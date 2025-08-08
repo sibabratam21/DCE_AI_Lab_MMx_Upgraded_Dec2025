@@ -77,157 +77,11 @@ Return the result as a JSON array matching the provided schema. Be logical and a
     }
 };
 
+import { generateDemoInsights, generateDemoFeatures, generateDemoModels, generateDemoOptimization } from './demoSimulation';
+
 export const getEdaInsights = async (selections: UserColumnSelection, data: ParsedData[], userInput: string): Promise<EdaInsights> => {
-    const dateCol = Object.keys(selections).find(k => selections[k] === ColumnType.TIME_DIMENSION);
-    const kpiCol = Object.keys(selections).find(k => selections[k] === ColumnType.DEPENDENT_VARIABLE);
-    const spendCols = Object.keys(selections).filter(k => selections[k] === ColumnType.MARKETING_SPEND);
-    const activityCols = Object.keys(selections).filter(k => selections[k] === ColumnType.MARKETING_ACTIVITY);
-    
-    // Create paired channels (spend + activity) or standalone channels
-    const channelPairs: Array<{name: string, spendCol?: string, activityCol: string}> = [];
-    
-    activityCols.forEach(activityCol => {
-        // Try to find matching spend column by similar name
-        const matchingSpendCol = spendCols.find(spendCol => {
-            const activityBase = activityCol.toLowerCase().replace(/_?(impressions?|clicks?|grps?|reach|views?)$/i, '');
-            const spendBase = spendCol.toLowerCase().replace(/_?(spend|cost|investment)$/i, '');
-            return activityBase.includes(spendBase) || spendBase.includes(activityBase);
-        });
-        
-        channelPairs.push({
-            name: matchingSpendCol ? activityCol.replace(/_?(impressions?|clicks?|grps?|reach|views?)$/i, '') : activityCol,
-            spendCol: matchingSpendCol,
-            activityCol: activityCol
-        });
-    });
-    
-    // Add any unmatched spend columns as standalone
-    const usedSpendCols = channelPairs.map(p => p.spendCol).filter(Boolean);
-    spendCols.filter(col => !usedSpendCols.includes(col)).forEach(spendCol => {
-        channelPairs.push({
-            name: spendCol,
-            spendCol: spendCol,
-            activityCol: spendCol // Use spend as activity for calculation
-        });
-    });
-
-    if (!dateCol || !kpiCol) {
-        throw new Error("A 'Time Dimension' and 'Dependent Variable' column must be selected.");
-    }
-    
-    const dates = data
-        .map(row => new Date(String(row[dateCol])))
-        .filter(d => d instanceof Date && !isNaN(d.getTime()))
-        .sort((a,b) => a.getTime() - b.getTime());
-    
-    let dateRangeString = "The date range could not be determined from the data.";
-    if (dates.length > 0) {
-        const startDate = dates[0];
-        const endDate = dates[dates.length - 1];
-        dateRangeString = `The full dataset spans from ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}.`;
-    }
-
-    const dataSample = getCsvSampleFromData(data, 20);
-
-    const prompt = `You are a senior data analyst creating EDA for a Marketing Mix Model based on the user's actual data.
-    
-    Data Sample (first 20 rows):
-    \`\`\`csv
-    ${dataSample}
-    \`\`\`
-
-    Full Data Context:
-    - ${dateRangeString}
-    - Total Rows: ${data.length}
-
-    Channel Pairs to analyze: ${channelPairs.map(p => `${p.name} (Activity: ${p.activityCol}${p.spendCol ? `, Spend: ${p.spendCol}` : ''})`).join(', ')}
-    Dependent Variable (KPI): ${kpiCol}
-    Time series is based on: ${dateCol}
-    ${userInput ? `User Feedback/Context: "${userInput}"` : ''}
-
-    Tasks:
-    1.  For each channel pair, calculate diagnostic summary based on the ACTIVITY column (primary metric):
-        -   **Sparsity**: Percentage of zero-value entries in activity column (e.g., "5% zeros").
-        -   **Volatility (CV)**: Coefficient of Variation of activity column (e.g., "25.8% CV").
-        -   **Latest 52W Spend**: If spend column exists, sum the most recent 52 weeks spend. If no spend column, state "Activity Only".
-        -   **YoY Spend Trend**: If spend exists and >= 104 rows, compare recent 52W vs prior 52W spend (e.g., "+15%"). Otherwise "N/A".
-        -   **Commentary**: Brief business insight about the channel pair.
-    2.  Write a 'trendsSummary' of the overall KPI trend (1-2 sentences).
-    3.  Write a 'diagnosticsSummary' of the overall data quality (1-2 sentences).
-
-    Return a single JSON object with keys: "channelDiagnostics", "trendsSummary", "diagnosticsSummary".
-    The "channelDiagnostics" should be an array of objects, each with "name", "sparsity", "volatility", "yoyTrend", and "commentary".
-    `;
-
-    const insightsSchema = {
-        type: Type.OBJECT,
-        properties: {
-            trendsSummary: { type: Type.STRING },
-            diagnosticsSummary: { type: Type.STRING },
-            channelDiagnostics: {
-                type: Type.ARRAY,
-                items: {
-                    type: Type.OBJECT,
-                    properties: {
-                        name: { type: Type.STRING },
-                        sparsity: { type: Type.STRING },
-                        volatility: { type: Type.STRING },
-                        latest52wSpend: { type: Type.STRING },
-                        yoySpendTrend: { type: Type.STRING },
-                        commentary: { type: Type.STRING },
-                    },
-                    required: ['name', 'sparsity', 'volatility', 'latest52wSpend', 'yoySpendTrend', 'commentary']
-                }
-            }
-        },
-        required: ['trendsSummary', 'diagnosticsSummary', 'channelDiagnostics']
-    }
-    
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: { responseMimeType: 'application/json', responseSchema: insightsSchema }
-    });
-
-    try {
-        const aiData = JSON.parse(response.text);
-        // Aggregate to weekly data for better performance and readability
-        const dailyData = data.map(row => ({
-            date: String(row[dateCol]) || '',
-            kpi: Number(row[kpiCol]) || 0,
-        })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        
-        // Group by week and sum KPI values
-        const weeklyAggregation: { [key: string]: number[] } = {};
-        dailyData.forEach(point => {
-            const date = new Date(point.date);
-            const weekStart = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
-            const weekKey = weekStart.toISOString().split('T')[0];
-            if (!weeklyAggregation[weekKey]) weeklyAggregation[weekKey] = [];
-            weeklyAggregation[weekKey].push(point.kpi);
-        });
-        
-        const trendData: TrendDataPoint[] = Object.keys(weeklyAggregation)
-            .sort()
-            .map(weekKey => ({
-                date: weekKey,
-                kpi: weeklyAggregation[weekKey].reduce((sum, val) => sum + val, 0)
-            }));
-
-        return {
-            ...aiData,
-            channelDiagnostics: aiData.channelDiagnostics.map((d: any) => ({
-                ...d, 
-                isApproved: true,
-                // Map new spend fields to old interface for compatibility
-                yoyTrend: d.yoySpendTrend || 'N/A'
-            })),
-            trendData,
-        };
-    } catch (e) {
-        console.error("Failed to parse EDA insights:", response.text, e);
-        throw new Error("Received an invalid JSON format from the AI for EDA insights.");
-    }
+    // Use fast demo simulation instead of AI processing for snappy performance
+    return generateDemoInsights(selections, data);
 }
 
 const featuresSchema = {
@@ -246,6 +100,9 @@ const featuresSchema = {
 };
 
 export const recommendFeatures = async (selections: UserColumnSelection, approvedChannels: string[], userInput: string): Promise<FeatureParams[]> => {
+    // Use fast demo simulation instead of AI processing
+    return generateDemoFeatures(approvedChannels);
+/*
     const prompt = `
 You are a Marketing Mix Modeling expert. For the following marketing channels, recommend appropriate feature engineering parameters: adstock, lag, and transformation type.
 
@@ -272,6 +129,7 @@ Generate a plausible recommendation for each channel and return a JSON array mat
         console.error("Failed to parse feature recommendations:", response.text, e);
         throw new Error("Received an invalid JSON format for feature recommendations.");
     }
+*/
 }
 
 export const getFeatureEngineeringSummary = async (features: FeatureParams[]): Promise<string> => {
@@ -339,6 +197,10 @@ const leaderboardSchema = {
 };
 
 export const generateModelLeaderboard = async (selections: UserColumnSelection, features: FeatureParams[], userInput: string, data: ParsedData[]): Promise<ModelRun[]> => {
+    // Use fast demo simulation instead of AI processing
+    const channels = features.map(f => f.channel);
+    return generateDemoModels(channels);
+/*
     const prompt = `
 You are a data science platform simulating an automated model building process for MMM.
 Given the user's setup, generate a plausible but *simulated* leaderboard of model runs.
@@ -385,6 +247,7 @@ Generate a JSON array of 12 model run objects according to the schema. Ensure ev
         console.error("Failed to parse model leaderboard:", response.text, e);
         throw new Error("Received an invalid JSON format from the AI for the model leaderboard.");
     }
+*/
 };
 
 const getDataSampleAsCsv = (data: ParsedData[], rowCount = 50): string => {
