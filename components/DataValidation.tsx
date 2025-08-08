@@ -71,8 +71,9 @@ export const DataValidation: React.FC<DataValidationProps> = ({
         onDiagnosticsChange(newDiagnostics);
     };
 
+    // Only use activity channels for correlation analysis - spend is only for ROI calculations
     const marketingChannels = useMemo(() => Object.keys(selections).filter(key => 
-        [ColumnType.MARKETING_SPEND, ColumnType.MARKETING_ACTIVITY].includes(selections[key])
+        selections[key] === ColumnType.MARKETING_ACTIVITY
     ), [selections]);
 
     const loadCorrelationData = () => {

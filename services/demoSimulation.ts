@@ -1,5 +1,14 @@
 import { UserColumnSelection, ColumnType, EdaInsights, TrendDataPoint, ChannelDiagnostic, ParsedData, FeatureParams, ModelRun, OptimizerScenario } from '../types';
 
+/**
+ * SPEND vs ACTIVITY SEPARATION LOGIC:
+ * 
+ * - ACTIVITY columns (impressions, clicks, GRPs): Used for ALL modeling, features, diagnostics, correlation
+ * - SPEND columns (spend, cost, investment): Used ONLY for ROI calculations and budget optimization
+ * 
+ * This ensures we model media activity effects properly while tracking spend for business ROI.
+ */
+
 // Realistic demo simulation for MMM diagnostics
 export const generateDemoInsights = (selections: UserColumnSelection, data: ParsedData[]): EdaInsights => {
     const dateCol = Object.keys(selections).find(k => selections[k] === ColumnType.TIME_DIMENSION);
@@ -123,8 +132,8 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
     };
 };
 
-// Generate realistic feature engineering recommendations
-export const generateDemoFeatures = (approvedChannels: string[]): FeatureParams[] => {
+// Generate realistic feature engineering recommendations (activity channels only)
+export const generateDemoFeatures = (approvedActivityChannels: string[]): FeatureParams[] => {
     const channelDefaults: { [key: string]: { adstock: number; lag: number; transform: string; rationale: string } } = {
         'TV': { adstock: 0.7, lag: 1, transform: 'S-Curve', rationale: 'TV has strong carryover effects and exhibits diminishing returns at high spend levels.' },
         'Radio': { adstock: 0.5, lag: 0, transform: 'S-Curve', rationale: 'Radio has moderate carryover with immediate impact and saturation effects.' },
@@ -134,7 +143,7 @@ export const generateDemoFeatures = (approvedChannels: string[]): FeatureParams[
         'Video': { adstock: 0.6, lag: 1, transform: 'S-Curve', rationale: 'Video content builds awareness over time with saturation at high frequency.' }
     };
 
-    return approvedChannels.map(channel => {
+    return approvedActivityChannels.map(channel => {
         const baseChannel = Object.keys(channelDefaults).find(key => 
             channel.toLowerCase().includes(key.toLowerCase())
         );
@@ -153,16 +162,16 @@ export const generateDemoFeatures = (approvedChannels: string[]): FeatureParams[
     });
 };
 
-// Generate realistic model leaderboard with believable performance metrics
-export const generateDemoModels = (channelPairs: string[]): ModelRun[] => {
+// Generate realistic model leaderboard with believable performance metrics (activity channels only)
+export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
     const modelTypes = ['Ridge Regression', 'Random Forest', 'XGBoost', 'Bayesian MMM'];
     
     return modelTypes.map((modelType, index) => {
         const baseRsquared = 0.75 + (Math.random() * 0.2) - 0.1; // 0.65 to 0.95
         const mape = 8 + (Math.random() * 12); // 8% to 20%
         
-        // Generate realistic channel contributions
-        const channelDetails = channelPairs.map((channel, i) => {
+        // Generate realistic channel contributions (activity-based analysis)
+        const channelDetails = activityChannels.map((channel, i) => {
             const baseContrib = 0.15 + (Math.random() * 0.25); // 15% to 40%
             const efficiency = 1.2 + (Math.random() * 1.8); // $1.20 to $3.00 ROI
             
@@ -185,14 +194,14 @@ export const generateDemoModels = (channelPairs: string[]): ModelRun[] => {
             mape: mape,
             channelDetails: channelDetails,
             selectedModel: index === 0, // First model is selected by default
-            summary: `${modelType} achieves ${(baseRsquared * 100).toFixed(1)}% R² with ${mape.toFixed(1)}% MAPE across ${channelPairs.length} channels.`,
+            summary: `${modelType} achieves ${(baseRsquared * 100).toFixed(1)}% R² with ${mape.toFixed(1)}% MAPE across ${activityChannels.length} activity channels.`,
             insights: `Top performing channels: ${channelDetails.sort((a, b) => b.efficiency - a.efficiency).slice(0, 2).map(ch => ch.channel).join(', ')}.`
         } as ModelRun;
     });
 };
 
-// Generate realistic optimization scenarios
-export const generateDemoOptimization = (currentSpend: number, channels: string[]): OptimizerScenario[] => {
+// Generate realistic optimization scenarios (spend-based allocations from activity analysis)
+export const generateDemoOptimization = (currentSpend: number, activityChannels: string[]): OptimizerScenario[] => {
     const scenarios = [
         { name: 'Current Allocation', multiplier: 1.0, description: 'Maintain current spend distribution' },
         { name: 'Efficiency Focused', multiplier: 1.0, description: 'Reallocate to highest ROI channels' },
@@ -207,8 +216,8 @@ export const generateDemoOptimization = (currentSpend: number, channels: string[
         const allocations: { [key: string]: number } = {};
         let remaining = totalBudget;
         
-        channels.forEach((channel, i) => {
-            const isLast = i === channels.length - 1;
+        activityChannels.forEach((channel, i) => {
+            const isLast = i === activityChannels.length - 1;
             if (isLast) {
                 allocations[channel] = remaining;
             } else {

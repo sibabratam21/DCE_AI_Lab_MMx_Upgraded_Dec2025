@@ -36,9 +36,9 @@ export async function getEnhancedEdaInsights(
   // First, perform real statistical calculations
   const realInsights = await calculateRealEdaInsights(selections, data, userInput);
   
-  // Then enhance with AI interpretation
-  const marketingCols = Object.keys(selections).filter(k => 
-    [ColumnType.MARKETING_SPEND, ColumnType.MARKETING_ACTIVITY].includes(selections[k])
+  // Then enhance with AI interpretation - only use activity columns for analysis
+  const activityCols = Object.keys(selections).filter(k => 
+    selections[k] === ColumnType.MARKETING_ACTIVITY
   );
   
   const prompt = `You are Maya, an expert Marketing Mix Modeling analyst. I've performed statistical calculations on marketing data, and I need you to provide enhanced business insights and commentary.
@@ -46,7 +46,7 @@ export async function getEnhancedEdaInsights(
 **Real Statistical Results:**
 ${JSON.stringify(realInsights, null, 2)}
 
-**Marketing Channels:** ${marketingCols.join(', ')}
+**Marketing Activity Channels:** ${activityCols.join(', ')}
 **User Context:** ${userInput || 'None provided'}
 
 **Your Task:**

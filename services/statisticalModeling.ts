@@ -256,8 +256,9 @@ export async function calculateRealEdaInsights(
 ): Promise<EdaInsights> {
   const dateCol = Object.keys(selections).find(k => selections[k] === ColumnType.TIME_DIMENSION);
   const kpiCol = Object.keys(selections).find(k => selections[k] === ColumnType.DEPENDENT_VARIABLE);
-  const marketingCols = Object.keys(selections).filter(k => 
-    [ColumnType.MARKETING_SPEND, ColumnType.MARKETING_ACTIVITY].includes(selections[k])
+  // Use ONLY activity columns for analysis - spend is only for ROI calculations
+  const activityCols = Object.keys(selections).filter(k => 
+    selections[k] === ColumnType.MARKETING_ACTIVITY
   );
 
   if (!dateCol || !kpiCol) {
@@ -273,8 +274,8 @@ export async function calculateRealEdaInsights(
     .filter(point => point.date && !isNaN(new Date(point.date).getTime()))
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  // Calculate real diagnostics for each marketing channel
-  const channelDiagnostics: ChannelDiagnostic[] = marketingCols.map(channel => {
+  // Calculate real diagnostics for each activity channel only
+  const channelDiagnostics: ChannelDiagnostic[] = activityCols.map(channel => {
     const values = data.map(row => Number(row[channel]) || 0);
     
     // Calculate sparsity (percentage of zeros)
@@ -354,8 +355,9 @@ export async function runRealMMModeling(
   features: FeatureParams[]
 ): Promise<ModelRun[]> {
   const kpiCol = Object.keys(selections).find(k => selections[k] === ColumnType.DEPENDENT_VARIABLE);
-  const marketingCols = Object.keys(selections).filter(k => 
-    [ColumnType.MARKETING_SPEND, ColumnType.MARKETING_ACTIVITY].includes(selections[k])
+  // Use ONLY activity columns for modeling - spend is only for ROI calculations
+  const activityCols = Object.keys(selections).filter(k => 
+    selections[k] === ColumnType.MARKETING_ACTIVITY
   );
   
   // Separate spend columns for ROI calculations
@@ -390,7 +392,7 @@ export async function runRealMMModeling(
       const transformedData: { [key: string]: number[] } = {};
       
       for (const feature of features) {
-        if (!marketingCols.includes(feature.channel)) continue;
+        if (!activityCols.includes(feature.channel)) continue;
         
         let values = data.map(row => Number(row[feature.channel]) || 0);
         
@@ -441,7 +443,7 @@ export async function runRealMMModeling(
       // Calculate channel contributions and ROI
       const coefficients = regression.getCoefficients();
       const details = features.map((feature, idx) => {
-        if (idx >= coefficients.length || !marketingCols.includes(feature.channel)) {
+        if (idx >= coefficients.length || !activityCols.includes(feature.channel)) {
           return {
             name: feature.channel,
             included: false,

@@ -225,8 +225,20 @@ const App: React.FC = () => {
   }, [addMessage, userSelections, parsedData, userQuery, featureParams]);
 
   const handleProceedToFeatures = useCallback(async () => {
-    const approvedChannels = channelDiagnostics.filter(d => d.isApproved).map(d => d.name);
-    if(approvedChannels.length === 0) {
+    // Filter to get only activity channels for features and modeling
+    const approvedActivityChannels = channelDiagnostics
+      .filter(d => d.isApproved)
+      .map(d => d.name)
+      .filter(channelName => {
+        // Find the actual activity column name for this channel
+        const activityCols = Object.keys(userSelections).filter(k => userSelections[k] === ColumnType.MARKETING_ACTIVITY);
+        return activityCols.some(activityCol => 
+          activityCol.toLowerCase().includes(channelName.toLowerCase()) ||
+          channelName.toLowerCase().includes(activityCol.toLowerCase())
+        );
+      });
+    
+    if(approvedActivityChannels.length === 0) {
         addMessage("It looks like no channels are approved. Please approve at least one channel from the diagnostics table on the right to continue, then let me know you want to proceed.", 'ai');
         setAwaitingEdaConfirmation(true); // Let them try again
         return;
@@ -238,7 +250,7 @@ const App: React.FC = () => {
     setLoadingMessage('Recommending features...');
     try {
       addMessage("I'll recommend feature engineering parameters like adstock and lag effects based on industry best practices and your data. These represent the lingering and delayed effects of your advertising.");
-      const features = await recommendFeatures(userSelections, approvedChannels, userQuery);
+      const features = await recommendFeatures(userSelections, approvedActivityChannels, userQuery);
       setFeatureParams(features);
       const summary = await getFeatureEngineeringSummary(features);
       setFeatureEngineeringSummary(summary);
