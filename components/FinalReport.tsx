@@ -54,19 +54,31 @@ export const FinalReport: React.FC<FinalReportProps> = ({ model, onGoToOptimizer
     }
 
     const includedChannels = model.details.filter(p => p.included);
-    const totalSpend = includedChannels.reduce((sum, p) => sum + (p.adstock * 500 + p.lag * 100), 1000); // Simulated
-    const totalImpact = includedChannels.reduce((sum, p) => sum + p.contribution, 0) * 1000;
-    const baseImpact = 85000;
-    const grandTotalImpact = totalImpact + baseImpact;
+    const totalSpend = includedChannels.reduce((sum, p) => sum + (p.adstock * 8000 + p.lag * 2000), 10000) / 10; // More realistic pharma spend
+    
+    // Calculate normalized contributions to ensure they sum to 100% with base sales
+    const rawTotalContribution = includedChannels.reduce((sum, p) => sum + p.contribution, 0);
+    const basePercentage = 25; // Base sales represent 25% of total impact
+    const marketingPercentage = 100 - basePercentage; // Marketing channels get 75%
+    
+    // Scale the contributions so marketing channels sum to marketingPercentage (75%)
+    const contributionScale = marketingPercentage / rawTotalContribution;
+    
+    const totalImpact = 100000; // Total KPI impact for percentage calculations
+    const baseImpact = (basePercentage / 100) * totalImpact;
+    const marketingImpact = totalImpact - baseImpact;
 
     const reportData = includedChannels.map(p => {
-        const spend = (p.adstock * 500 + p.lag * 100) + Math.random() * 20; // Simulated
-        const attributedKPI = p.contribution / 100 * totalImpact;
-        const impactPercentage = (attributedKPI / grandTotalImpact) * 100;
+        const spend = ((p.adstock * 8000 + p.lag * 2000) / 10) + Math.random() * 5; // More realistic pharma spend
+        const scaledContribution = p.contribution * contributionScale; // Scaled contribution percentage
+        const attributedKPI = (scaledContribution / 100) * totalImpact;
+        const impactPercentage = scaledContribution; // This will now properly sum to marketingPercentage (75%)
         const avgROI = p.roi;
         const mROI = avgROI * (1 - p.adstock) * 0.8;
         return { name: p.name, spend, attributedKPI, impactPercentage, avgROI, mROI };
     });
+    
+    const grandTotalImpact = totalImpact;
 
     const blendedRoiColor = model.roi < 0 ? 'text-red-600' : 'text-green-600';
     
@@ -88,7 +100,7 @@ export const FinalReport: React.FC<FinalReportProps> = ({ model, onGoToOptimizer
         reportData.forEach(d => {
             textContent += `| ${d.name.padEnd(25)} | $${d.spend.toFixed(1).padStart(7)}M | ${d.attributedKPI.toLocaleString(undefined, { maximumFractionDigits: 0 }).padStart(14)} | ${d.impactPercentage.toFixed(1).padStart(8)}% | $${d.avgROI.toFixed(2).padStart(8)} | $${d.mROI.toFixed(2).padStart(10)} |\n`;
         });
-         const baseImpactPercent = ((baseImpact / grandTotalImpact) * 100).toFixed(1);
+         const baseImpactPercent = basePercentage.toFixed(1);
         textContent += `| Base Sales / Intercept    | -          | ${baseImpact.toLocaleString().padStart(14)} | ${baseImpactPercent.padStart(8)}% | -          | -            |\n`;
         textContent += `--------------------------------------------------------------------------------------------------\n\n`;
         
@@ -152,7 +164,7 @@ export const FinalReport: React.FC<FinalReportProps> = ({ model, onGoToOptimizer
                             <td className="p-3 font-semibold">Base Sales / Intercept</td>
                             <td>-</td>
                             <td>{baseImpact.toLocaleString()}</td>
-                            <td>{((baseImpact / grandTotalImpact) * 100).toFixed(1)}%</td>
+                            <td>{basePercentage.toFixed(1)}%</td>
                             <td>-</td><td>-</td>
                         </tr>
                     </tbody>
@@ -162,7 +174,7 @@ export const FinalReport: React.FC<FinalReportProps> = ({ model, onGoToOptimizer
                  <p className="text-gray-600 mb-4 text-sm">These curves show the estimated diminishing returns for each channel based on its transformation setting in the final model.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {includedChannels.map(p => {
-                        const chartData = generateResponseCurve(p, totalImpact);
+                        const chartData = generateResponseCurve(p, marketingImpact);
                         return (
                             <div key={p.name} className="bg-gray-100 p-4 rounded-lg">
                                 <h5 className="font-semibold text-center mb-2 text-gray-800">{p.name} <span className="text-xs font-normal text-gray-500">({p.transform})</span></h5>

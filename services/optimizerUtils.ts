@@ -40,7 +40,7 @@ const generateScenario = (
     const channels: OptimizerScenarioChannel[] = model.details
         .filter(p => p.included)
         .map(p => {
-            const currentSpend = p.adstock * 500 + p.lag * 100 + Math.random() * 20;
+            const currentSpend = (p.adstock * 8000 + p.lag * 2000 + Math.random() * 1000) / 10; // More realistic pharma spend levels
             const spendMultiplier = spendMultiplierProfile(p.roi);
             const recommendedSpend = currentSpend * spendMultiplier;
             const change = recommendedSpend === 0 && currentSpend === 0 ? 0 : ((recommendedSpend - currentSpend) / currentSpend) * 100;

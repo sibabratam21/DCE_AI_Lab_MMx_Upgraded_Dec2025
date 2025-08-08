@@ -212,7 +212,7 @@ const App: React.FC = () => {
     try {
       // Use fast demo models for snappy performance
       const approvedActivityChannels = featureParams.map(f => f.channel);
-      const results = generateDemoModels(approvedActivityChannels);
+      const results = generateDemoModels(approvedActivityChannels, userSelections, userQuery);
       setModelLeaderboard(results);
       addMessage("Modeling complete! Here is the new Modeling Workspace. The leaderboard is on the left. Click a model ID to see its detailed results and calibration controls on the right. You can ask me questions about these results (e.g., 'What is the TV impact in br_1?'), request a re-run with new parameters, or tune the active model via chat.");
     } catch (e) {
@@ -256,7 +256,7 @@ const App: React.FC = () => {
       addMessage("I'll recommend feature engineering parameters like adstock and lag effects based on industry best practices and your data. These represent the lingering and delayed effects of your advertising.");
       const features = await recommendFeatures(userSelections, approvedActivityChannels, userQuery);
       setFeatureParams(features);
-      const summary = await getFeatureEngineeringSummary(features);
+      const summary = await getFeatureEngineeringSummary(features, userSelections, userQuery);
       setFeatureEngineeringSummary(summary);
       setCompletedSteps(prev => new Set(prev).add(AppStep.DataValidation));
       setCurrentStep(AppStep.FeatureEngineering);

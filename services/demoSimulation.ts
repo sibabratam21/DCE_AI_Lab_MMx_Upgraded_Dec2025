@@ -93,9 +93,24 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
                 if (recent52w > 0) {
                     latest52wSpend = `$${(recent52w / 1000).toFixed(0)}k`;
                 } else {
-                    // Generate realistic spend based on channel type and activity levels
+                    // Generate realistic pharmaceutical-level spend based on channel type and activity levels
                     const avgActivity = activityValues.reduce((sum, val) => sum + val, 0) / activityValues.length;
-                    const estimatedSpend = avgActivity * 0.001 * 52; // Rough CPM estimation
+                    let spendMultiplier = 0.05; // Default multiplier
+                    
+                    // Channel-specific realistic spend multipliers for pharma
+                    if (channelName.toLowerCase().includes('tv')) {
+                        spendMultiplier = 0.15; // TV campaigns are expensive
+                    } else if (channelName.toLowerCase().includes('hcp')) {
+                        spendMultiplier = 0.08; // HCP programs have moderate costs
+                    } else if (channelName.toLowerCase().includes('speaker')) {
+                        spendMultiplier = 0.25; // Speaker programs are very expensive
+                    } else if (channelName.toLowerCase().includes('display')) {
+                        spendMultiplier = 0.03; // Digital display is more cost-effective
+                    } else if (channelName.toLowerCase().includes('search')) {
+                        spendMultiplier = 0.04; // Search has moderate CPC costs
+                    }
+                    
+                    const estimatedSpend = avgActivity * spendMultiplier * 52; // Realistic spend estimation
                     latest52wSpend = `$${Math.round(estimatedSpend / 1000)}k`;
                 }
                 
@@ -114,7 +129,22 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
             } else {
                 // For shorter data periods, still show realistic spend
                 const avgActivity = activityValues.reduce((sum, val) => sum + val, 0) / activityValues.length;
-                const estimatedSpend = avgActivity * 0.001 * Math.min(data.length, 52);
+                let spendMultiplier = 0.05; // Default multiplier
+                
+                // Channel-specific realistic spend multipliers for pharma
+                if (channelName.toLowerCase().includes('tv')) {
+                    spendMultiplier = 0.15; // TV campaigns are expensive
+                } else if (channelName.toLowerCase().includes('hcp')) {
+                    spendMultiplier = 0.08; // HCP programs have moderate costs
+                } else if (channelName.toLowerCase().includes('speaker')) {
+                    spendMultiplier = 0.25; // Speaker programs are very expensive
+                } else if (channelName.toLowerCase().includes('display')) {
+                    spendMultiplier = 0.03; // Digital display is more cost-effective
+                } else if (channelName.toLowerCase().includes('search')) {
+                    spendMultiplier = 0.04; // Search has moderate CPC costs
+                }
+                
+                const estimatedSpend = avgActivity * spendMultiplier * Math.min(data.length, 52);
                 latest52wSpend = `$${Math.round(estimatedSpend / 1000)}k`;
             }
         }
@@ -249,9 +279,13 @@ export const generateDemoFeatures = (approvedActivityChannels: string[]): Featur
 };
 
 // Generate realistic model leaderboard with believable performance metrics (activity channels only)
-export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
+export const generateDemoModels = (activityChannels: string[], userSelections?: UserColumnSelection, userContext?: string): ModelRun[] => {
     const models: ModelRun[] = [];
     let modelCounter = 1;
+    
+    // Extract context from user selections
+    const kpiCol = userSelections ? Object.keys(userSelections).find(k => userSelections[k] === ColumnType.DEPENDENT_VARIABLE) : null;
+    const geoCol = userSelections ? Object.keys(userSelections).find(k => userSelections[k] === ColumnType.GEO_DIMENSION) : null;
     
     // Algorithm-specific configurations
     const algoConfigs = [
@@ -261,7 +295,7 @@ export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
             rsqRange: [0.78, 0.92],
             mapeRange: [7, 15],
             hasPValues: true,
-            commentary: (r2: number, mape: number) => `Linear regression with statistical significance testing. Strong interpretability with R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Ideal for stakeholder communication and coefficient interpretation.`
+            commentary: (r2: number, mape: number, kpiCol?: string) => `Linear regression with statistical significance testing${kpiCol ? ` for ${kpiCol} prediction` : ''}. Strong interpretability with R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Ideal for stakeholder communication and coefficient interpretation.`
         },
         {
             name: 'Bayesian Regression',
@@ -269,7 +303,7 @@ export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
             rsqRange: [0.76, 0.89],
             mapeRange: [8, 16],
             hasPValues: true,
-            commentary: (r2: number, mape: number) => `Bayesian approach with uncertainty quantification. R² = ${(r2*100).toFixed(1)}% with ${mape.toFixed(1)}% MAPE. Provides credible intervals and handles collinearity well.`
+            commentary: (r2: number, mape: number, kpiCol?: string) => `Bayesian approach with uncertainty quantification${kpiCol ? ` for ${kpiCol} modeling` : ''}. R² = ${(r2*100).toFixed(1)}% with ${mape.toFixed(1)}% MAPE. Provides credible intervals and handles collinearity well.`
         },
         {
             name: 'LightGBM',
@@ -277,7 +311,7 @@ export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
             rsqRange: [0.82, 0.94],
             mapeRange: [5, 12],
             hasPValues: false,
-            commentary: (r2: number, mape: number) => `Gradient boosting with feature importance. Superior performance: R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Captures non-linear interactions and saturation effects automatically.`
+            commentary: (r2: number, mape: number, kpiCol?: string) => `Gradient boosting with feature importance${kpiCol ? ` for ${kpiCol} optimization` : ''}. Superior performance: R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Captures non-linear interactions and saturation effects automatically.`
         },
         {
             name: 'NN',
@@ -285,7 +319,7 @@ export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
             rsqRange: [0.79, 0.91],
             mapeRange: [6, 14],
             hasPValues: false,
-            commentary: (r2: number, mape: number) => `Neural network with regularization. R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Excellent at modeling complex saturation curves and channel interactions.`
+            commentary: (r2: number, mape: number, kpiCol?: string) => `Neural network with regularization${kpiCol ? ` for ${kpiCol} prediction` : ''}. R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Excellent at modeling complex saturation curves and channel interactions.`
         }
     ];
 
@@ -343,7 +377,7 @@ export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
                 rsq: rsqVariation,
                 mape: mapeVariation,
                 roi: blendedRoi,
-                commentary: config.commentary(rsqVariation, mapeVariation),
+                commentary: config.commentary(rsqVariation, mapeVariation, kpiCol || undefined),
                 details: modelDetails
             } as ModelRun);
             

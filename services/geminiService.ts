@@ -132,16 +132,33 @@ Generate a plausible recommendation for each channel and return a JSON array mat
 */
 }
 
-export const getFeatureEngineeringSummary = async (features: FeatureParams[]): Promise<string> => {
+export const getFeatureEngineeringSummary = async (features: FeatureParams[], selections?: UserColumnSelection, userContext?: string): Promise<string> => {
     // Generate fast, well-formatted analysis for demo performance
     const highAdstockChannels = features.filter(f => f.adstock > 0.5);
     const lowAdstockChannels = features.filter(f => f.adstock <= 0.2);
     const highLagChannels = features.filter(f => f.lag >= 2);
     const sCurveChannels = features.filter(f => f.transform === 'S-Curve');
     
+    // Get context from user selections
+    const kpiCol = selections ? Object.keys(selections).find(k => selections[k] === ColumnType.DEPENDENT_VARIABLE) : null;
+    const geoCol = selections ? Object.keys(selections).find(k => selections[k] === ColumnType.GEO_DIMENSION) : null;
+    const spendCols = selections ? Object.keys(selections).filter(k => selections[k] === ColumnType.MARKETING_SPEND) : [];
+    
+    // Context-aware strategy description
+    let strategyText = "This parameter setup is designed to accurately model the carryover effects, time delays, and diminishing returns patterns of your marketing channels";
+    if (kpiCol) strategyText += ` to optimize ${kpiCol} performance`;
+    if (geoCol) strategyText += ` across ${geoCol} markets`;
+    strategyText += " and measure true channel effectiveness.";
+    
+    // Add user context if provided
+    let contextNote = "";
+    if (userContext && userContext.trim()) {
+        contextNote = `\n\n*Based on your input: "${userContext}" - these parameters have been tailored to align with your specific business context and requirements.*`;
+    }
+    
     return `**Overall Strategy**
 
-This parameter setup is designed to accurately model the carryover effects, time delays, and diminishing returns patterns of your marketing channels to optimize budget allocation and measure true channel effectiveness.
+${strategyText}${contextNote}
 
 **Key Highlights**
 
