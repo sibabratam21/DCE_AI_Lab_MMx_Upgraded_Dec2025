@@ -34,21 +34,11 @@ export async function loadDemoDataset(): Promise<ParsedData[]> {
 
 // Get demo dataset info for the agent to reference
 export function getDemoDatasetInfo(): string {
-  return `I'm working with your marketing mix modeling dataset that includes:
-  
-📊 **Dataset Overview:**
-- Time period: Multiple weeks of marketing and performance data
-- Contains both spend and activity metrics for various marketing channels
-- Includes dependent variable (KPI) for modeling
+  return `Hey there! 👋 I'm Maya, your Marketing Mix Modeling expert, and I'm absolutely thrilled to work with you today!
 
-🎯 **Key Columns Expected:**
-- **Time Dimension**: Week/Date column for temporal analysis  
-- **Dependent Variable**: Your main KPI (sales, prescriptions, revenue, etc.)
-- **Marketing Spend**: Budget allocation for different channels
-- **Marketing Activity**: Volume metrics (impressions, clicks, etc.)
-- **Control Variables**: External factors (seasonality, promotions, etc.)
+I've got some fantastic news - I've already loaded up the latest marketing performance data and have everything prepared for our deep dive into your MMM analysis. We're talking about a comprehensive dataset with all your key marketing channels, performance metrics, and the contextual factors that really matter for understanding what's driving results.
 
-I've pre-loaded this data so we can dive straight into the MMx analysis. Let me help you validate the column classifications and guide you through the statistical modeling process!`;
+I can't wait to help you uncover those hidden insights about which channels are truly moving the needle, optimize your media mix, and build a bulletproof strategy for maximizing ROI. This is going to be such a fun analytical journey together! ✨`;
 }
 
 // Check if demo mode should be enabled (dataset exists)

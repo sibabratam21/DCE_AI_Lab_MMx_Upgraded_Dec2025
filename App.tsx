@@ -93,7 +93,7 @@ const App: React.FC = () => {
       
       if (demoAvailable) {
         addMessage(getDemoDatasetInfo());
-        addMessage("Ready to start! I can either load your pre-configured dataset automatically or you can upload your own CSV file. What would you like to do?");
+        addMessage("Perfect! I can see you're as excited as I am to dive into this data. Just hit that big friendly button when you're ready, and we'll jump straight into validating your marketing channels and setting up the perfect MMM analysis. Trust me, the insights we're about to uncover are going to be absolutely game-changing! 🎉");
       } else {
         addMessage("Hello! I'm your Marketing Mix Modeling AI assistant. I'll guide you through analyzing your marketing data to uncover key insights. Let's start by uploading your data in CSV format.");
       }
@@ -640,31 +640,37 @@ const App: React.FC = () => {
     switch (currentStep) {
       case AppStep.Welcome:
         return (
-          <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-            <div className="space-y-4">
-              {isDemoDataAvailable && (
-                <button 
-                  onClick={handleLoadDemoData}
-                  disabled={isLoading}
-                  className="primary-button inline-flex items-center justify-center mb-2"
-                >
-                  🚀 Load Demo Dataset
-                </button>
-              )}
-              
-              <div className={isDemoDataAvailable ? "relative" : ""}>
-                {isDemoDataAvailable && (
-                  <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 text-xs text-gray-500">
-                    or
-                  </div>
-                )}
-                <label htmlFor="file-upload" className="primary-button cursor-pointer inline-flex items-center justify-center mt-2">
-                  <UploadIcon className="w-6 h-6 mr-3" />
-                  Upload Your Own CSV
-                </label>
+          <div className="flex flex-col items-center justify-center h-full p-8 text-center max-w-2xl mx-auto">
+            <div className="space-y-6">
+              <div className="space-y-4">
+                <h1 className="text-4xl font-bold text-gray-900 mb-2">
+                  Welcome to Marketing Mix Modeling! 
+                </h1>
+                <div className="text-lg text-gray-700 leading-relaxed space-y-3">
+                  <p>
+                    🎯 <strong>Ready to unlock the secrets of your marketing performance?</strong>
+                  </p>
+                  <p>
+                    I'm Maya, your dedicated MMM expert, and I've got everything set up and ready to go! 
+                    Your latest marketing data is already loaded, analyzed, and waiting for us to dive deep into 
+                    what's really driving results across your channels.
+                  </p>
+                  <p>
+                    From understanding channel contributions to optimizing budget allocation, 
+                    we're about to embark on an exciting journey of data-driven insights that will 
+                    transform how you think about marketing effectiveness! ✨
+                  </p>
+                </div>
               </div>
+              
+              <button 
+                onClick={handleLoadDemoData}
+                disabled={isLoading}
+                className="primary-button text-lg px-8 py-4 inline-flex items-center justify-center"
+              >
+                🚀 Let's Start the Analysis!
+              </button>
             </div>
-            <input id="file-upload" name="file-upload" type="file" className="sr-only" accept=".csv" onChange={handleFileChange} />
             {error && <p className="mt-4 text-red-600" role="alert">{error}</p>}
           </div>
         );
