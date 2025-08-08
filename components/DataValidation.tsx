@@ -61,6 +61,10 @@ export const DataValidation: React.FC<DataValidationProps> = ({
 }) => {
     
     const [activeTab, setActiveTab] = useState<'diagnostics' | 'correlation' | 'sparsity'>('diagnostics');
+    const [correlationData, setCorrelationData] = useState<{ [key: string]: { [key: string]: number } } | null>(null);
+    const [sparsityData, setSparsityData] = useState<Array<{ name: string; sparsity: number }> | null>(null);
+    const [isLoadingCorrelation, setIsLoadingCorrelation] = useState(false);
+    const [isLoadingSparsity, setIsLoadingSparsity] = useState(false);
 
     const handleToggleAction = (index: number, isApproved: boolean) => {
         const newDiagnostics = diagnostics.map((diag, i) => i === index ? { ...diag, isApproved } : diag);
@@ -71,38 +75,51 @@ export const DataValidation: React.FC<DataValidationProps> = ({
         [ColumnType.MARKETING_SPEND, ColumnType.MARKETING_ACTIVITY].includes(selections[key])
     ), [selections]);
 
-    const correlationMatrix = useMemo(() => {
-        const matrix: { [key: string]: { [key: string]: number } } = {};
-        for(const ch1 of marketingChannels) {
-            matrix[ch1] = {};
-            for (const ch2 of marketingChannels) {
-                if(ch1 === ch2) {
-                    matrix[ch1][ch2] = 1;
-                    continue;
+    const loadCorrelationData = () => {
+        if (correlationData || isLoadingCorrelation) return;
+        
+        setIsLoadingCorrelation(true);
+        setTimeout(() => {
+            const matrix: { [key: string]: { [key: string]: number } } = {};
+            for(const ch1 of marketingChannels) {
+                matrix[ch1] = {};
+                for (const ch2 of marketingChannels) {
+                    if(ch1 === ch2) {
+                        matrix[ch1][ch2] = 1;
+                        continue;
+                    }
+                    if (matrix[ch2] && typeof matrix[ch2][ch1] !== 'undefined') {
+                         matrix[ch1][ch2] = matrix[ch2][ch1];
+                         continue;
+                    }
+                    const data1 = parsedData.map(d => Number(d[ch1]) || 0);
+                    const data2 = parsedData.map(d => Number(d[ch2]) || 0);
+                    matrix[ch1][ch2] = calculateCorrelation(data1, data2);
                 }
-                if (matrix[ch2] && typeof matrix[ch2][ch1] !== 'undefined') {
-                     matrix[ch1][ch2] = matrix[ch2][ch1];
-                     continue;
-                }
-                const data1 = parsedData.map(d => Number(d[ch1]) || 0);
-                const data2 = parsedData.map(d => Number(d[ch2]) || 0);
-                matrix[ch1][ch2] = calculateCorrelation(data1, data2);
             }
-        }
-        return matrix;
-    }, [parsedData, marketingChannels]);
+            setCorrelationData(matrix);
+            setIsLoadingCorrelation(false);
+        }, 100);
+    };
 
-    const sparsityData = useMemo(() => {
-        return marketingChannels.map(ch => {
-            if (!parsedData || parsedData.length === 0) {
-                return { name: ch, sparsity: 0 };
-            }
-            const values = parsedData.map(d => d[ch]);
-            const zeroCount = values.filter(v => v == null || v === 0 || String(v).trim() === '').length;
-            const sparsityPercentage = (zeroCount / parsedData.length) * 100;
-            return { name: ch, sparsity: sparsityPercentage };
-        });
-    }, [parsedData, marketingChannels]);
+    const loadSparsityData = () => {
+        if (sparsityData || isLoadingSparsity) return;
+        
+        setIsLoadingSparsity(true);
+        setTimeout(() => {
+            const data = marketingChannels.map(ch => {
+                if (!parsedData || parsedData.length === 0) {
+                    return { name: ch, sparsity: 0 };
+                }
+                const values = parsedData.map(d => d[ch]);
+                const zeroCount = values.filter(v => v == null || v === 0 || String(v).trim() === '').length;
+                const sparsityPercentage = (zeroCount / parsedData.length) * 100;
+                return { name: ch, sparsity: sparsityPercentage };
+            });
+            setSparsityData(data);
+            setIsLoadingSparsity(false);
+        }, 100);
+    };
 
     const tabs = [
         { id: 'diagnostics', name: 'Channel Diagnostics' },
@@ -146,15 +163,16 @@ export const DataValidation: React.FC<DataValidationProps> = ({
                                         <th className="p-3">Channel</th>
                                         <th className="p-3">Sparsity</th>
                                         <th className="p-3">Volatility (CV)</th>
-                                        <th className="p-3">YoY Trend</th>
+                                        <th className="p-3">Latest 52W Spend</th>
+                                        <th className="p-3">YoY Spend Trend</th>
                                         <th className="p-3 w-2/5">AI Commentary</th>
                                         <th className="p-3 text-center">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {diagnostics.map((d, i) => {
-                                        const trendValue = parseFloat(d.yoyTrend);
-                                        const trendColor = trendValue > 0 ? 'text-green-600' : trendValue < 0 ? 'text-red-600' : 'text-gray-700';
+                                        const spendTrendValue = parseFloat((d as any).yoySpendTrend || d.yoyTrend);
+                                        const trendColor = spendTrendValue > 0 ? 'text-green-600' : spendTrendValue < 0 ? 'text-red-600' : 'text-gray-700';
                                         const volatilityValue = parseFloat(d.volatility);
                                         const volatilityColor = volatilityValue > 50 ? 'text-yellow-600' : 'text-gray-700';
                                         return (
@@ -162,7 +180,8 @@ export const DataValidation: React.FC<DataValidationProps> = ({
                                                 <td className="p-3 font-semibold">{d.name}</td>
                                                 <td className="p-3">{d.sparsity}</td>
                                                 <td className={`p-3 font-mono ${volatilityColor}`}>{d.volatility}</td>
-                                                <td className={`p-3 font-mono font-bold ${trendColor}`}>{d.yoyTrend}</td>
+                                                <td className="p-3 font-mono">{(d as any).latest52wSpend || 'N/A'}</td>
+                                                <td className={`p-3 font-mono font-bold ${trendColor}`}>{(d as any).yoySpendTrend || d.yoyTrend}</td>
                                                 <td className="p-3 text-gray-500 text-xs italic">{d.commentary}</td>
                                                 <td className="p-3 text-center">
                                                     <div className="inline-flex rounded-md shadow-sm" role="group">
@@ -195,45 +214,67 @@ export const DataValidation: React.FC<DataValidationProps> = ({
                 return (
                      <div className="overflow-x-auto">
                         <p className="text-sm text-gray-600 mb-4">Correlation matrix of marketing channels. High values (&gt;0.7, in red) may indicate multicollinearity, which can make model results unstable.</p>
-                        <table className="w-full text-center text-xs border-collapse">
-                            <thead>
-                                <tr>
-                                    <th className="p-2 border border-gray-200 bg-gray-100"></th>
-                                    {marketingChannels.map(ch => <th key={ch} className="p-2 border border-gray-200 bg-gray-100 font-medium">{ch}</th>)}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {marketingChannels.map(ch1 => (
-                                    <tr key={ch1}>
-                                        <td className="p-2 border border-gray-200 font-medium bg-gray-100">{ch1}</td>
-                                        {marketingChannels.map(ch2 => (
-                                            <td key={ch2} className={`p-2 border border-gray-200 font-mono ${getCorrelationColor(correlationMatrix[ch1]?.[ch2] ?? 0)}`}>
-                                                {correlationMatrix[ch1]?.[ch2]?.toFixed(2)}
-                                            </td>
-                                        ))}
+                        {isLoadingCorrelation ? (
+                            <div className="flex justify-center items-center py-12">
+                                <div className="text-center">
+                                    <Loader />
+                                    <p className="mt-2 font-medium text-gray-600">Loading correlation matrix...</p>
+                                </div>
+                            </div>
+                        ) : correlationData ? (
+                            <table className="w-full text-center text-xs border-collapse">
+                                <thead>
+                                    <tr>
+                                        <th className="p-2 border border-gray-200 bg-gray-100"></th>
+                                        {marketingChannels.map(ch => <th key={ch} className="p-2 border border-gray-200 bg-gray-100 font-medium">{ch}</th>)}
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {marketingChannels.map(ch1 => (
+                                        <tr key={ch1}>
+                                            <td className="p-2 border border-gray-200 font-medium bg-gray-100">{ch1}</td>
+                                            {marketingChannels.map(ch2 => (
+                                                <td key={ch2} className={`p-2 border border-gray-200 font-mono ${getCorrelationColor(correlationData[ch1]?.[ch2] ?? 0)}`}>
+                                                    {correlationData[ch1]?.[ch2]?.toFixed(2)}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        ) : (
+                            <div className="text-center py-8 text-gray-500">Click the tab to load correlation data</div>
+                        )}
                     </div>
                  );
             case 'sparsity':
                 return (
                     <div>
                         <p className="text-sm text-gray-600 mb-4">Sparsity of marketing channels, measured as the percentage of zero-value entries. High sparsity may affect model stability or indicate "flighted" campaigns.</p>
-                        <ResponsiveContainer width="100%" height={350}>
-                            <BarChart data={sparsityData} margin={{ top: 5, right: 20, left: 0, bottom: 80 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} />
-                                <XAxis dataKey="name" stroke={chartColors.text} angle={-45} textAnchor="end" interval={0} height={100} tick={{ fontSize: 12 }} />
-                                <YAxis stroke={chartColors.text} unit="%" />
-                                <Tooltip wrapperClassName="glass-pane" formatter={(value) => `${Number(value).toFixed(1)}%`} />
-                                <Bar dataKey="sparsity" name="Sparsity %">
-                                    {sparsityData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={entry.sparsity > 50 ? '#ef4444' : entry.sparsity > 20 ? '#f59e0b' : chartColors.bar} />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
+                        {isLoadingSparsity ? (
+                            <div className="flex justify-center items-center py-12">
+                                <div className="text-center">
+                                    <Loader />
+                                    <p className="mt-2 font-medium text-gray-600">Loading sparsity analysis...</p>
+                                </div>
+                            </div>
+                        ) : sparsityData ? (
+                            <ResponsiveContainer width="100%" height={350}>
+                                <BarChart data={sparsityData} margin={{ top: 5, right: 20, left: 0, bottom: 80 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} />
+                                    <XAxis dataKey="name" stroke={chartColors.text} angle={-45} textAnchor="end" interval={0} height={100} tick={{ fontSize: 12 }} />
+                                    <YAxis stroke={chartColors.text} unit="%" />
+                                    <Tooltip wrapperClassName="glass-pane" formatter={(value) => `${Number(value).toFixed(1)}%`} />
+                                    <Bar dataKey="sparsity" name="Sparsity %">
+                                        {sparsityData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.sparsity > 50 ? '#ef4444' : entry.sparsity > 20 ? '#f59e0b' : chartColors.bar} />
+                                        ))}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="text-center py-8 text-gray-500">Click the tab to load sparsity data</div>
+                        )}
                     </div>
                 );
         }
@@ -291,7 +332,11 @@ export const DataValidation: React.FC<DataValidationProps> = ({
                                 {tabs.map(tab => (
                                     <button
                                         key={tab.id}
-                                        onClick={() => setActiveTab(tab.id as any)}
+                                        onClick={() => {
+                                            setActiveTab(tab.id as any);
+                                            if (tab.id === 'correlation') loadCorrelationData();
+                                            if (tab.id === 'sparsity') loadSparsityData();
+                                        }}
                                         className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
                                             activeTab === tab.id
                                             ? 'border-[#EC7200] text-[#EC7200]'

@@ -80,9 +80,36 @@ Return the result as a JSON array matching the provided schema. Be logical and a
 export const getEdaInsights = async (selections: UserColumnSelection, data: ParsedData[], userInput: string): Promise<EdaInsights> => {
     const dateCol = Object.keys(selections).find(k => selections[k] === ColumnType.TIME_DIMENSION);
     const kpiCol = Object.keys(selections).find(k => selections[k] === ColumnType.DEPENDENT_VARIABLE);
-    const marketingCols = Object.keys(selections).filter(k => 
-        [ColumnType.MARKETING_SPEND, ColumnType.MARKETING_ACTIVITY].includes(selections[k])
-    );
+    const spendCols = Object.keys(selections).filter(k => selections[k] === ColumnType.MARKETING_SPEND);
+    const activityCols = Object.keys(selections).filter(k => selections[k] === ColumnType.MARKETING_ACTIVITY);
+    
+    // Create paired channels (spend + activity) or standalone channels
+    const channelPairs: Array<{name: string, spendCol?: string, activityCol: string}> = [];
+    
+    activityCols.forEach(activityCol => {
+        // Try to find matching spend column by similar name
+        const matchingSpendCol = spendCols.find(spendCol => {
+            const activityBase = activityCol.toLowerCase().replace(/_?(impressions?|clicks?|grps?|reach|views?)$/i, '');
+            const spendBase = spendCol.toLowerCase().replace(/_?(spend|cost|investment)$/i, '');
+            return activityBase.includes(spendBase) || spendBase.includes(activityBase);
+        });
+        
+        channelPairs.push({
+            name: matchingSpendCol ? activityCol.replace(/_?(impressions?|clicks?|grps?|reach|views?)$/i, '') : activityCol,
+            spendCol: matchingSpendCol,
+            activityCol: activityCol
+        });
+    });
+    
+    // Add any unmatched spend columns as standalone
+    const usedSpendCols = channelPairs.map(p => p.spendCol).filter(Boolean);
+    spendCols.filter(col => !usedSpendCols.includes(col)).forEach(spendCol => {
+        channelPairs.push({
+            name: spendCol,
+            spendCol: spendCol,
+            activityCol: spendCol // Use spend as activity for calculation
+        });
+    });
 
     if (!dateCol || !kpiCol) {
         throw new Error("A 'Time Dimension' and 'Dependent Variable' column must be selected.");
@@ -113,19 +140,20 @@ export const getEdaInsights = async (selections: UserColumnSelection, data: Pars
     - ${dateRangeString}
     - Total Rows: ${data.length}
 
-    Marketing Channels to analyze: ${marketingCols.join(', ')}
+    Channel Pairs to analyze: ${channelPairs.map(p => `${p.name} (Activity: ${p.activityCol}${p.spendCol ? `, Spend: ${p.spendCol}` : ''})`).join(', ')}
     Dependent Variable (KPI): ${kpiCol}
     Time series is based on: ${dateCol}
     ${userInput ? `User Feedback/Context: "${userInput}"` : ''}
 
     Tasks:
-    1.  For each marketing channel, calculate its diagnostic summary based on the provided data.
-        -   **Sparsity**: Calculate the percentage of zero-value entries. Return as a string (e.g., "5% zeros").
-        -   **Volatility (CV)**: Calculate the Coefficient of Variation (StdDev / Mean). Return as a string (e.g., "25.8% CV").
-        -   **YoY Trend**: Based on the full date range provided (${dateRangeString}), estimate the Year-over-Year trend. If the data covers two years or more (e.g., >= 104 weekly rows), calculate the trend by comparing the sum of the most recent 52 weeks to the 52 weeks prior to that. If it's less than two years, state: "Not enough data for YoY trend (less than 2 years)". Return as a percentage string (e.g., "+15%", "-8%").
-        -   **Commentary**: Write a brief, insightful AI commentary that EXPLAINS the calculated metrics in a business context. For example, if volatility is high, suggest it might be due to flighted campaigns.
-    2.  Write a 'trendsSummary' of the overall KPI trend based on the data.
-    3.  Write a 'diagnosticsSummary' of the overall data quality, referencing the calculated diagnostics.
+    1.  For each channel pair, calculate diagnostic summary based on the ACTIVITY column (primary metric):
+        -   **Sparsity**: Percentage of zero-value entries in activity column (e.g., "5% zeros").
+        -   **Volatility (CV)**: Coefficient of Variation of activity column (e.g., "25.8% CV").
+        -   **Latest 52W Spend**: If spend column exists, sum the most recent 52 weeks spend. If no spend column, state "Activity Only".
+        -   **YoY Spend Trend**: If spend exists and >= 104 rows, compare recent 52W vs prior 52W spend (e.g., "+15%"). Otherwise "N/A".
+        -   **Commentary**: Brief business insight about the channel pair.
+    2.  Write a 'trendsSummary' of the overall KPI trend (1-2 sentences).
+    3.  Write a 'diagnosticsSummary' of the overall data quality (1-2 sentences).
 
     Return a single JSON object with keys: "channelDiagnostics", "trendsSummary", "diagnosticsSummary".
     The "channelDiagnostics" should be an array of objects, each with "name", "sparsity", "volatility", "yoyTrend", and "commentary".
@@ -144,10 +172,11 @@ export const getEdaInsights = async (selections: UserColumnSelection, data: Pars
                         name: { type: Type.STRING },
                         sparsity: { type: Type.STRING },
                         volatility: { type: Type.STRING },
-                        yoyTrend: { type: Type.STRING },
+                        latest52wSpend: { type: Type.STRING },
+                        yoySpendTrend: { type: Type.STRING },
                         commentary: { type: Type.STRING },
                     },
-                    required: ['name', 'sparsity', 'volatility', 'yoyTrend', 'commentary']
+                    required: ['name', 'sparsity', 'volatility', 'latest52wSpend', 'yoySpendTrend', 'commentary']
                 }
             }
         },
@@ -162,14 +191,37 @@ export const getEdaInsights = async (selections: UserColumnSelection, data: Pars
 
     try {
         const aiData = JSON.parse(response.text);
-        const trendData: TrendDataPoint[] = data.map(row => ({
+        // Aggregate to weekly data for better performance and readability
+        const dailyData = data.map(row => ({
             date: String(row[dateCol]) || '',
             kpi: Number(row[kpiCol]) || 0,
         })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        // Group by week and sum KPI values
+        const weeklyAggregation: { [key: string]: number[] } = {};
+        dailyData.forEach(point => {
+            const date = new Date(point.date);
+            const weekStart = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
+            const weekKey = weekStart.toISOString().split('T')[0];
+            if (!weeklyAggregation[weekKey]) weeklyAggregation[weekKey] = [];
+            weeklyAggregation[weekKey].push(point.kpi);
+        });
+        
+        const trendData: TrendDataPoint[] = Object.keys(weeklyAggregation)
+            .sort()
+            .map(weekKey => ({
+                date: weekKey,
+                kpi: weeklyAggregation[weekKey].reduce((sum, val) => sum + val, 0)
+            }));
 
         return {
             ...aiData,
-            channelDiagnostics: aiData.channelDiagnostics.map((d: any) => ({...d, isApproved: true})),
+            channelDiagnostics: aiData.channelDiagnostics.map((d: any) => ({
+                ...d, 
+                isApproved: true,
+                // Map new spend fields to old interface for compatibility
+                yoyTrend: d.yoySpendTrend || 'N/A'
+            })),
             trendData,
         };
     } catch (e) {
