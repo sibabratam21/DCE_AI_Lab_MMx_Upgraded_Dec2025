@@ -467,16 +467,37 @@ export async function runRealMMModeling(
         
         const contributionPct = totalContribution > 0 ? (contribution / totalContribution) * 100 : 0;
         
-        // Calculate ROI only if this is a spend channel
+        // Calculate ROI by finding the matching spend column for this activity channel
         let roi = 0;
-        if (spendCols.includes(feature.channel)) {
-          // This is a spend channel - calculate real ROI
-          const spendData = data.map(row => Number(row[feature.channel]) || 0);
+        const activityCol = feature.channel;
+        
+        // Find matching spend column by similar name pattern (same logic as demoSimulation.ts)
+        const matchingSpendCol = spendCols.find(spendCol => {
+          const activityBase = activityCol.toLowerCase().replace(/_?(impressions?|clicks?|grps?|reach|views?|activity|count|events?|sends?|engagements?)$/i, '');
+          const spendBase = spendCol.toLowerCase().replace(/_?(spend|cost|investment)$/i, '');
+          
+          return (
+            activityBase === spendBase ||
+            activityBase.includes(spendBase) || 
+            spendBase.includes(activityBase) ||
+            // Handle specific naming patterns like TV_Impressions -> TV_Spend
+            activityCol.toLowerCase().replace(/_(impressions?|clicks?|count|events?|sends?|engagements?)$/i, '_spend') === spendCol.toLowerCase() ||
+            // Handle patterns like Display_Impressions -> Display_Spend  
+            activityBase.replace(/[^a-z]/g, '') === spendBase.replace(/[^a-z]/g, '') ||
+            // Handle HCP patterns
+            (activityBase.startsWith('hcp') && spendBase.startsWith('hcp') && 
+             activityBase.replace('hcp', '') === spendBase.replace('hcp', ''))
+          );
+        });
+        
+        if (matchingSpendCol) {
+          // Found a matching spend column - calculate real ROI
+          const spendData = data.map(row => Number(row[matchingSpendCol]) || 0);
           const meanSpend = StatisticalUtils.mean(spendData);
           const attributedKPI = contributionPct / 100 * StatisticalUtils.mean(y);
-          roi = meanSpend > 0 ? (attributedKPI / meanSpend) - 1 : 0;
+          roi = meanSpend > 0 ? (attributedKPI / meanSpend) : 0;
         } else {
-          // This is an activity channel - no spend data available, ROI is N/A
+          // No matching spend column found - ROI is N/A
           roi = NaN; // Will display as "N/A" in the UI
         }
         

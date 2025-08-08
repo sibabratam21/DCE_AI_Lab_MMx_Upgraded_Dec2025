@@ -2,7 +2,7 @@ import {
     generateEnhancedModelLeaderboard, // Real regression modeling  
     getRealDataChatResponse,          // Real data analysis
   } from './services/hybridAnalysisService';
-  import { generateDemoInsights as fastDemoInsights } from './services/demoSimulation';
+  import { generateDemoInsights as fastDemoInsights, generateDemoModels } from './services/demoSimulation';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { AppStep, EdaResult, UserColumnSelection, ColumnType, AgentMessage, ParsedData, EdaInsights, FeatureParams, ModelRun, ChannelDiagnostic, ColumnSummaryItem, ModelingInteractionResponse, CalibrationInteractionResponse, ModelDetail, OptimizerScenario, OptimizerInteractionResponse } from './types';
@@ -208,15 +208,17 @@ const App: React.FC = () => {
     setError(null);
     setCompletedSteps(prev => new Set(prev).add(AppStep.FeatureEngineering));
     setCurrentStep(AppStep.Modeling);
-    addMessage("I'm now running a suite of simulated modeling techniques to find the most reliable result. This may take a moment...");
+    addMessage("I'm now building multiple regression models to find the most reliable result. This may take a moment...");
     try {
-      const results = await generateEnhancedModelLeaderboard(userSelections, featureParams, userQuery, parsedData);
+      // Use fast demo models for snappy performance
+      const approvedActivityChannels = featureParams.map(f => f.channel);
+      const results = generateDemoModels(approvedActivityChannels);
       setModelLeaderboard(results);
       addMessage("Modeling complete! Here is the new Modeling Workspace. The leaderboard is on the left. Click a model ID to see its detailed results and calibration controls on the right. You can ask me questions about these results (e.g., 'What is the TV impact in br_1?'), request a re-run with new parameters, or tune the active model via chat.");
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred during modeling.';
       setError(`Modeling failed: ${errorMessage}`);
-      addMessage(`I'm sorry, the modeling simulation failed. Error: ${errorMessage}.`);
+      addMessage(`I'm sorry, the modeling process failed. Error: ${errorMessage}.`);
       setCurrentStep(AppStep.FeatureEngineering);
     } finally {
       setIsLoading(false);

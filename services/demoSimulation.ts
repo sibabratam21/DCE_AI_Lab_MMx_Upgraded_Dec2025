@@ -250,7 +250,7 @@ export const generateDemoFeatures = (approvedActivityChannels: string[]): Featur
 
 // Generate realistic model leaderboard with believable performance metrics (activity channels only)
 export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
-    const modelTypes = ['Ridge Regression', 'Random Forest', 'XGBoost', 'Bayesian MMM'];
+    const modelTypes = ['GLM Regression', 'Bayesian Regression', 'LightGBM', 'NN'];
     
     return modelTypes.map((modelType, index) => {
         const baseRsquared = 0.75 + (Math.random() * 0.2) - 0.1; // 0.65 to 0.95
@@ -273,15 +273,28 @@ export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
         const totalContrib = channelDetails.reduce((sum, ch) => sum + ch.contribution, 0);
         channelDetails.forEach(ch => ch.contribution = (ch.contribution / totalContrib) * 0.8);
 
+        // Calculate blended ROI from channel efficiencies  
+        const blendedRoi = channelDetails.reduce((sum, ch) => {
+            return sum + (ch.efficiency * ch.contribution);
+        }, 0) / channelDetails.reduce((sum, ch) => sum + ch.contribution, 0);
+
         return {
             id: `model_${index}`,
-            modelType,
-            rsquared: baseRsquared,
+            algo: modelType as 'Bayesian Regression' | 'NN' | 'LightGBM' | 'GLM Regression',
+            rsq: baseRsquared,
             mape: mape,
-            channelDetails: channelDetails,
-            selectedModel: index === 0, // First model is selected by default
-            summary: `${modelType} achieves ${(baseRsquared * 100).toFixed(1)}% R² with ${mape.toFixed(1)}% MAPE across ${activityChannels.length} activity channels.`,
-            insights: `Top performing channels: ${channelDetails.sort((a, b) => b.efficiency - a.efficiency).slice(0, 2).map(ch => ch.channel).join(', ')}.`
+            roi: blendedRoi,
+            commentary: `${modelType} achieves ${(baseRsquared * 100).toFixed(1)}% R² with ${mape.toFixed(1)}% MAPE across ${activityChannels.length} activity channels. Top performing channels: ${channelDetails.sort((a, b) => b.efficiency - a.efficiency).slice(0, 2).map(ch => ch.channel).join(', ')}.`,
+            details: channelDetails.map(ch => ({
+                name: ch.channel,
+                included: true,
+                contribution: ch.contribution * 100, // Convert to percentage
+                roi: ch.efficiency,
+                pValue: Math.random() * 0.1, // Realistic p-values
+                adstock: 0.3 + Math.random() * 0.4, // 0.3-0.7 range
+                lag: Math.floor(Math.random() * 3), // 0-2 weeks
+                transform: ['Log-transform', 'S-Curve', 'Power', 'Negative Exponential'][Math.floor(Math.random() * 4)] as any
+            }))
         } as ModelRun;
     });
 };
