@@ -18,12 +18,26 @@ const chartColors = {
 }
 
 const ActiveModelDetail: React.FC<{ model: ModelRun; onModelChange: (model: ModelRun) => void; onRequestFinalize: () => void; isRecalibrating: boolean; }> = ({ model, onModelChange, onRequestFinalize, isRecalibrating }) => {
+    const [localModel, setLocalModel] = React.useState(model);
+    const [hasPendingChanges, setHasPendingChanges] = React.useState(false);
+
+    // Update local model when the prop changes (from recalibration result)
+    React.useEffect(() => {
+        setLocalModel(model);
+        setHasPendingChanges(false);
+    }, [model]);
     
     const handleParameterChange = (channelName: string, field: keyof ModelDetail, value: any) => {
-        const newDetails = model.details.map(d =>
+        const newDetails = localModel.details.map(d =>
             d.name === channelName ? { ...d, [field]: value } : d
         );
-        onModelChange({ ...model, details: newDetails });
+        setLocalModel({ ...localModel, details: newDetails });
+        setHasPendingChanges(true);
+    };
+
+    const handleRecalibrate = () => {
+        onModelChange(localModel);
+        setHasPendingChanges(false);
     };
     
     const roiColor = model.roi > 0 ? 'text-green-600' : 'text-red-600';
@@ -71,7 +85,7 @@ const ActiveModelDetail: React.FC<{ model: ModelRun; onModelChange: (model: Mode
                             <table className="w-full text-left text-sm">
                                 <thead className="bg-gray-100 sticky top-0"><tr><th className="p-2">Channel</th><th className="p-2">Adstock</th><th className="p-2">Lag</th><th className="p-2">Transform</th></tr></thead>
                                 <tbody>
-                                    {model.details.map(p => (
+                                    {localModel.details.map(p => (
                                     <tr key={p.name} className="border-b border-gray-200">
                                         <td className="py-2 px-2">
                                             <label className="flex items-center">
@@ -98,10 +112,21 @@ const ActiveModelDetail: React.FC<{ model: ModelRun; onModelChange: (model: Mode
                     </div>
                 </div>
 
-                <div className="mt-auto pt-6">
+                <div className="mt-auto pt-6 space-y-3">
+                    {hasPendingChanges && (
+                        <button
+                            onClick={handleRecalibrate}
+                            disabled={isRecalibrating}
+                            className="w-full bg-[#EC7200] hover:bg-[#EC7200]/90 text-white text-base font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isRecalibrating ? 'Recalibrating...' : 'Recalibrate Model'}
+                        </button>
+                    )}
                     <button
                         onClick={onRequestFinalize}
-                        className="w-full primary-button text-base font-semibold py-3 flex items-center justify-center gap-2"
+                        disabled={hasPendingChanges}
+                        className="w-full primary-button text-base font-semibold py-3 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={hasPendingChanges ? "Please recalibrate the model before finalizing" : ""}
                     >
                         Finalize Model &amp; Generate Report
                     </button>

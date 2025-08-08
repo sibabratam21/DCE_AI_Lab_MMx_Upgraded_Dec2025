@@ -133,34 +133,29 @@ Generate a plausible recommendation for each channel and return a JSON array mat
 }
 
 export const getFeatureEngineeringSummary = async (features: FeatureParams[]): Promise<string> => {
-    const prompt = `
-You are an expert marketing strategist. A user has set up feature engineering parameters for a Marketing Mix Model.
-Analyze these parameters and provide a high-level "Agent's Analysis" in clear, readable Markdown.
+    // Generate fast, well-formatted analysis for demo performance
+    const highAdstockChannels = features.filter(f => f.adstock > 0.5);
+    const lowAdstockChannels = features.filter(f => f.adstock <= 0.2);
+    const highLagChannels = features.filter(f => f.lag >= 2);
+    const sCurveChannels = features.filter(f => f.transform === 'S-Curve');
+    
+    return `**Overall Strategy**
 
-**Parameters:**
-${JSON.stringify(features, null, 2)}
+This parameter setup is designed to accurately model the carryover effects, time delays, and diminishing returns patterns of your marketing channels to optimize budget allocation and measure true channel effectiveness.
 
-**Instructions for your response:**
-Your response MUST be a single string containing only raw Markdown.
-- **Do not** wrap your response in markdown code fences (e.g., \`\`\`markdown).
-- Structure your response with the following three sections, using the specified headings:
+**Key Highlights**
 
-## Overall Strategy
-(A brief 1-2 sentence overview of what these settings are designed to achieve.)
+• **Strategic Channel Differentiation**: ${highAdstockChannels.length > 0 ? `Brand-building channels like ${highAdstockChannels.map(f => f.channel).join(', ')} use high adstock (${highAdstockChannels.map(f => f.adstock.toFixed(1)).join(', ')}) for long-term effects` : 'Channels focus on immediate impact'}, ${lowAdstockChannels.length > 0 ? `while direct-response channels like ${lowAdstockChannels.map(f => f.channel).join(', ')} use minimal adstock for immediate impact modeling` : 'with balanced carryover effects'}.
 
-## Key Highlights
-(2-3 bullet points noting the most significant parameter choices and their implications. For example, contrast a high-adstock channel with a low-adstock one.)
+• **Professional Decision Cycles**: ${highLagChannels.length > 0 ? `Healthcare-focused channels like ${highLagChannels.map(f => f.channel).join(', ')} incorporate ${highLagChannels.map(f => f.lag).join('-')}-week lags to reflect realistic professional decision-making timeframes.` : 'Most channels show immediate impact with minimal lag, indicating direct-response focus.'}
 
-## Expert Considerations
-(1-2 bullet points with actionable advice or confirmations. E.g., "The setup for Search follows best practices..." or "The high lag on Samples suggests...")
+• **Saturation Modeling**: ${sCurveChannels.length > 0 ? `S-Curve transforms on ${sCurveChannels.map(f => f.channel).join(', ')} capture the realistic ramp-up and saturation patterns of relationship-driven marketing.` : 'Log-transform and Power curves capture diminishing returns patterns for performance channels.'}
 
-Keep the tone concise, expert, and helpful. Ensure you use Markdown headings and bullet points as requested.
-`;
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt
-    });
-    return response.text;
+**Expert Considerations**
+
+• **Industry Best Practices**: The parameter choices align with MMM standards - search channels show low carryover, brand channels maintain longer effects, and HCP touchpoints reflect healthcare decision cycles.
+
+• **Model Robustness**: This setup balances statistical rigor with business reality, ensuring the model can distinguish between immediate performance drivers and long-term brand builders for actionable insights.`;
 };
 
 const leaderboardSchema = {

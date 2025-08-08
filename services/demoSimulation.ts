@@ -250,52 +250,111 @@ export const generateDemoFeatures = (approvedActivityChannels: string[]): Featur
 
 // Generate realistic model leaderboard with believable performance metrics (activity channels only)
 export const generateDemoModels = (activityChannels: string[]): ModelRun[] => {
-    const modelTypes = ['GLM Regression', 'Bayesian Regression', 'LightGBM', 'NN'];
+    const models: ModelRun[] = [];
+    let modelCounter = 1;
     
-    return modelTypes.map((modelType, index) => {
-        const baseRsquared = 0.75 + (Math.random() * 0.2) - 0.1; // 0.65 to 0.95
-        const mape = 8 + (Math.random() * 12); // 8% to 20%
-        
-        // Generate realistic channel contributions (activity-based analysis)
-        const channelDetails = activityChannels.map((channel, i) => {
-            const baseContrib = 0.15 + (Math.random() * 0.25); // 15% to 40%
-            const efficiency = 1.2 + (Math.random() * 1.8); // $1.20 to $3.00 ROI
+    // Algorithm-specific configurations
+    const algoConfigs = [
+        {
+            name: 'GLM Regression',
+            variants: 4,
+            rsqRange: [0.78, 0.92],
+            mapeRange: [7, 15],
+            hasPValues: true,
+            commentary: (r2: number, mape: number) => `Linear regression with statistical significance testing. Strong interpretability with R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Ideal for stakeholder communication and coefficient interpretation.`
+        },
+        {
+            name: 'Bayesian Regression',
+            variants: 3,
+            rsqRange: [0.76, 0.89],
+            mapeRange: [8, 16],
+            hasPValues: true,
+            commentary: (r2: number, mape: number) => `Bayesian approach with uncertainty quantification. R² = ${(r2*100).toFixed(1)}% with ${mape.toFixed(1)}% MAPE. Provides credible intervals and handles collinearity well.`
+        },
+        {
+            name: 'LightGBM',
+            variants: 4,
+            rsqRange: [0.82, 0.94],
+            mapeRange: [5, 12],
+            hasPValues: false,
+            commentary: (r2: number, mape: number) => `Gradient boosting with feature importance. Superior performance: R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Captures non-linear interactions and saturation effects automatically.`
+        },
+        {
+            name: 'NN',
+            variants: 3,
+            rsqRange: [0.79, 0.91],
+            mapeRange: [6, 14],
+            hasPValues: false,
+            commentary: (r2: number, mape: number) => `Neural network with regularization. R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Excellent at modeling complex saturation curves and channel interactions.`
+        }
+    ];
+
+    algoConfigs.forEach(config => {
+        for (let variant = 1; variant <= config.variants; variant++) {
+            // Create realistic performance variation within algorithm family
+            const rsqVariation = Math.random() * (config.rsqRange[1] - config.rsqRange[0]) + config.rsqRange[0];
+            const mapeVariation = Math.random() * (config.mapeRange[1] - config.mapeRange[0]) + config.mapeRange[0];
             
-            return {
-                channel,
-                contribution: baseContrib,
-                efficiency: efficiency,
-                confidenceInterval: [efficiency * 0.8, efficiency * 1.2]
-            };
-        });
+            // Generate channel details with algorithm-specific characteristics
+            const channelDetails = activityChannels.map((channel, i) => {
+                const baseContrib = 0.12 + (Math.random() * 0.28); // 12% to 40%
+                let efficiency = 1.1 + (Math.random() * 2.0); // $1.10 to $3.10 ROI
+                
+                // Algorithm-specific efficiency adjustments
+                if (config.name === 'LightGBM') {
+                    efficiency *= 1.05; // Slightly better at capturing efficiency
+                } else if (config.name === 'GLM Regression') {
+                    efficiency *= 0.97; // More conservative estimates
+                }
+                
+                return {
+                    channel,
+                    contribution: baseContrib,
+                    efficiency: efficiency,
+                    confidenceInterval: [efficiency * 0.8, efficiency * 1.2]
+                };
+            });
 
-        // Normalize contributions to sum to ~80% (leaving 20% for base/control)
-        const totalContrib = channelDetails.reduce((sum, ch) => sum + ch.contribution, 0);
-        channelDetails.forEach(ch => ch.contribution = (ch.contribution / totalContrib) * 0.8);
+            // Normalize contributions to sum to realistic total (75-85%)
+            const totalContrib = channelDetails.reduce((sum, ch) => sum + ch.contribution, 0);
+            const targetTotal = 0.75 + Math.random() * 0.10; // 75-85%
+            channelDetails.forEach(ch => ch.contribution = (ch.contribution / totalContrib) * targetTotal);
 
-        // Calculate blended ROI from channel efficiencies  
-        const blendedRoi = channelDetails.reduce((sum, ch) => {
-            return sum + (ch.efficiency * ch.contribution);
-        }, 0) / channelDetails.reduce((sum, ch) => sum + ch.contribution, 0);
+            // Calculate blended ROI from channel efficiencies  
+            const blendedRoi = channelDetails.reduce((sum, ch) => {
+                return sum + (ch.efficiency * ch.contribution);
+            }, 0) / channelDetails.reduce((sum, ch) => sum + ch.contribution, 0);
 
-        return {
-            id: `model_${index}`,
-            algo: modelType as 'Bayesian Regression' | 'NN' | 'LightGBM' | 'GLM Regression',
-            rsq: baseRsquared,
-            mape: mape,
-            roi: blendedRoi,
-            commentary: `${modelType} achieves ${(baseRsquared * 100).toFixed(1)}% R² with ${mape.toFixed(1)}% MAPE across ${activityChannels.length} activity channels. Top performing channels: ${channelDetails.sort((a, b) => b.efficiency - a.efficiency).slice(0, 2).map(ch => ch.channel).join(', ')}.`,
-            details: channelDetails.map(ch => ({
+            // Generate algorithm-appropriate model details
+            const modelDetails = channelDetails.map(ch => ({
                 name: ch.channel,
-                included: true,
+                included: Math.random() > 0.15, // 85% inclusion rate (some models exclude weak channels)
                 contribution: ch.contribution * 100, // Convert to percentage
                 roi: ch.efficiency,
-                pValue: Math.random() * 0.1, // Realistic p-values
-                adstock: 0.3 + Math.random() * 0.4, // 0.3-0.7 range
-                lag: Math.floor(Math.random() * 3), // 0-2 weeks
+                pValue: config.hasPValues ? Math.random() * 0.12 : null, // Only stats models have p-values
+                adstock: 0.2 + Math.random() * 0.6, // 0.2-0.8 range
+                lag: Math.floor(Math.random() * 4), // 0-3 weeks
                 transform: ['Log-transform', 'S-Curve', 'Power', 'Negative Exponential'][Math.floor(Math.random() * 4)] as any
-            }))
-        } as ModelRun;
+            }));
+
+            models.push({
+                id: `${config.name.toLowerCase().replace(/\s+/g, '_')}_${variant}`,
+                algo: config.name as 'Bayesian Regression' | 'NN' | 'LightGBM' | 'GLM Regression',
+                rsq: rsqVariation,
+                mape: mapeVariation,
+                roi: blendedRoi,
+                commentary: config.commentary(rsqVariation, mapeVariation),
+                details: modelDetails
+            } as ModelRun);
+            
+            modelCounter++;
+        }
+    });
+
+    // Sort by performance (R² desc, then MAPE asc)
+    return models.sort((a, b) => {
+        if (Math.abs(a.rsq - b.rsq) > 0.02) return b.rsq - a.rsq;
+        return a.mape - b.mape;
     });
 };
 
