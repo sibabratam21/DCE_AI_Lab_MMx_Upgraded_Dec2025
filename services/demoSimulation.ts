@@ -26,7 +26,7 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
     activityCols.forEach(activityCol => {
         // Find matching spend column by similar name pattern
         const matchingSpendCol = spendCols.find(spendCol => {
-            const activityBase = activityCol.toLowerCase().replace(/_?(impressions?|clicks?|grps?|reach|views?|activity)$/i, '');
+            const activityBase = activityCol.toLowerCase().replace(/_?(impressions?|clicks?|grps?|reach|views?|activity|count|events?|sends?|engagements?)$/i, '');
             const spendBase = spendCol.toLowerCase().replace(/_?(spend|cost|investment)$/i, '');
             return activityBase.includes(spendBase) || spendBase.includes(activityBase) || 
                    activityBase.replace(/[^a-z]/g, '') === spendBase.replace(/[^a-z]/g, '');
@@ -34,7 +34,7 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
         
         channelPairs.push({
             name: matchingSpendCol ? 
-                activityCol.replace(/_?(impressions?|clicks?|grps?|reach|views?|activity)$/i, '') : 
+                activityCol.replace(/_?(impressions?|clicks?|grps?|reach|views?|activity|count|events?|sends?|engagements?)$/i, '') : 
                 activityCol,
             spendCol: matchingSpendCol,
             activityCol: activityCol
@@ -136,11 +136,12 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
 export const generateDemoFeatures = (approvedActivityChannels: string[]): FeatureParams[] => {
     const channelDefaults: { [key: string]: { adstock: number; lag: number; transform: string; rationale: string } } = {
         'TV': { adstock: 0.7, lag: 1, transform: 'S-Curve', rationale: 'TV has strong carryover effects and exhibits diminishing returns at high spend levels.' },
-        'Radio': { adstock: 0.5, lag: 0, transform: 'S-Curve', rationale: 'Radio has moderate carryover with immediate impact and saturation effects.' },
-        'Search': { adstock: 0.1, lag: 0, transform: 'Log-transform', rationale: 'Search is direct response with minimal carryover and clear diminishing returns.' },
-        'Social': { adstock: 0.3, lag: 0, transform: 'Power', rationale: 'Social media has short-term effects with flexible response curves.' },
         'Display': { adstock: 0.4, lag: 1, transform: 'Negative Exponential', rationale: 'Display advertising has brand awareness carryover with exponential decay patterns.' },
-        'Video': { adstock: 0.6, lag: 1, transform: 'S-Curve', rationale: 'Video content builds awareness over time with saturation at high frequency.' }
+        'PaidSearch': { adstock: 0.1, lag: 0, transform: 'Log-transform', rationale: 'Paid search is direct response with minimal carryover and clear diminishing returns.' },
+        'HCPCalls': { adstock: 0.6, lag: 2, transform: 'S-Curve', rationale: 'HCP outreach has strong professional influence with 2-week lag for prescription decisions.' },
+        'Speaker': { adstock: 0.8, lag: 3, transform: 'S-Curve', rationale: 'Speaker events build long-term credibility with extended carryover effects.' },
+        'HCPEmail': { adstock: 0.2, lag: 1, transform: 'Log-transform', rationale: 'Digital HCP communication has quick response with moderate diminishing returns.' },
+        'HCPSocial': { adstock: 0.3, lag: 1, transform: 'Power', rationale: 'HCP social engagement has flexible response curves with short carryover.' }
     };
 
     return approvedActivityChannels.map(channel => {

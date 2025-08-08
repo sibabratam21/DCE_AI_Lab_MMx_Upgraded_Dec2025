@@ -232,10 +232,12 @@ const App: React.FC = () => {
       .filter(channelName => {
         // Find the actual activity column name for this channel
         const activityCols = Object.keys(userSelections).filter(k => userSelections[k] === ColumnType.MARKETING_ACTIVITY);
-        return activityCols.some(activityCol => 
-          activityCol.toLowerCase().includes(channelName.toLowerCase()) ||
-          channelName.toLowerCase().includes(activityCol.toLowerCase())
-        );
+        return activityCols.some(activityCol => {
+          const activityBase = activityCol.toLowerCase().replace(/_?(impressions?|clicks?|grps?|reach|views?|activity|count|events?|sends?|engagements?)$/i, '');
+          const channelBase = channelName.toLowerCase();
+          return activityBase.includes(channelBase) || channelBase.includes(activityBase) ||
+                 activityBase.replace(/[^a-z]/g, '') === channelBase.replace(/[^a-z]/g, '');
+        });
       });
     
     if(approvedActivityChannels.length === 0) {
