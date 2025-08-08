@@ -209,9 +209,9 @@ const leaderboardSchema = {
 };
 
 export const generateModelLeaderboard = async (selections: UserColumnSelection, features: FeatureParams[], userInput: string, data: ParsedData[]): Promise<ModelRun[]> => {
-    // Use fast demo simulation instead of AI processing
+    // Use fast demo simulation instead of AI processing, now honoring user's feature parameters
     const channels = features.map(f => f.channel);
-    return generateDemoModels(channels);
+    return generateDemoModels(channels, selections, userInput, features);
 /*
     const prompt = `
 You are a data science platform simulating an automated model building process for MMM.

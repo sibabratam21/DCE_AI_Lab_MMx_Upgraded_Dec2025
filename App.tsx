@@ -210,9 +210,9 @@ const App: React.FC = () => {
     setCurrentStep(AppStep.Modeling);
     addMessage("I'm now building multiple regression models to find the most reliable result. This may take a moment...");
     try {
-      // Use fast demo models for snappy performance
+      // Use fast demo models for snappy performance, now honoring user's feature selections
       const approvedActivityChannels = featureParams.map(f => f.channel);
-      const results = generateDemoModels(approvedActivityChannels, userSelections, userQuery);
+      const results = generateDemoModels(approvedActivityChannels, userSelections, userQuery, featureParams);
       setModelLeaderboard(results);
       addMessage("Modeling complete! Here is the new Modeling Workspace. The leaderboard is on the left. Click a model ID to see its detailed results and calibration controls on the right. You can ask me questions about these results (e.g., 'What is the TV impact in br_1?'), request a re-run with new parameters, or tune the active model via chat.");
     } catch (e) {

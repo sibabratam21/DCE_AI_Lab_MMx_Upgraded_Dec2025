@@ -9,6 +9,26 @@ import { UserColumnSelection, ColumnType, EdaInsights, TrendDataPoint, ChannelDi
  * This ensures we model media activity effects properly while tracking spend for business ROI.
  */
 
+// Centralized spend calculation for consistency across all tabs
+export const calculateRealisticSpend = (channelName: string, avgActivity: number, periodWeeks: number = 52): number => {
+    let spendMultiplier = 0.05; // Default multiplier
+    
+    // Channel-specific realistic spend multipliers for pharma
+    if (channelName.toLowerCase().includes('tv')) {
+        spendMultiplier = 0.15; // TV campaigns are expensive
+    } else if (channelName.toLowerCase().includes('hcp')) {
+        spendMultiplier = 0.08; // HCP programs have moderate costs
+    } else if (channelName.toLowerCase().includes('speaker')) {
+        spendMultiplier = 0.25; // Speaker programs are very expensive
+    } else if (channelName.toLowerCase().includes('display')) {
+        spendMultiplier = 0.03; // Digital display is more cost-effective
+    } else if (channelName.toLowerCase().includes('search')) {
+        spendMultiplier = 0.04; // Search has moderate CPC costs
+    }
+    
+    return avgActivity * spendMultiplier * periodWeeks;
+};
+
 // Realistic demo simulation for MMM diagnostics
 export const generateDemoInsights = (selections: UserColumnSelection, data: ParsedData[]): EdaInsights => {
     const dateCol = Object.keys(selections).find(k => selections[k] === ColumnType.TIME_DIMENSION);
@@ -95,22 +115,7 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
                 } else {
                     // Generate realistic pharmaceutical-level spend based on channel type and activity levels
                     const avgActivity = activityValues.reduce((sum, val) => sum + val, 0) / activityValues.length;
-                    let spendMultiplier = 0.05; // Default multiplier
-                    
-                    // Channel-specific realistic spend multipliers for pharma
-                    if (channelName.toLowerCase().includes('tv')) {
-                        spendMultiplier = 0.15; // TV campaigns are expensive
-                    } else if (channelName.toLowerCase().includes('hcp')) {
-                        spendMultiplier = 0.08; // HCP programs have moderate costs
-                    } else if (channelName.toLowerCase().includes('speaker')) {
-                        spendMultiplier = 0.25; // Speaker programs are very expensive
-                    } else if (channelName.toLowerCase().includes('display')) {
-                        spendMultiplier = 0.03; // Digital display is more cost-effective
-                    } else if (channelName.toLowerCase().includes('search')) {
-                        spendMultiplier = 0.04; // Search has moderate CPC costs
-                    }
-                    
-                    const estimatedSpend = avgActivity * spendMultiplier * 52; // Realistic spend estimation
+                    const estimatedSpend = calculateRealisticSpend(channelName, avgActivity, 52);
                     latest52wSpend = `$${Math.round(estimatedSpend / 1000)}k`;
                 }
                 
@@ -129,22 +134,7 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
             } else {
                 // For shorter data periods, still show realistic spend
                 const avgActivity = activityValues.reduce((sum, val) => sum + val, 0) / activityValues.length;
-                let spendMultiplier = 0.05; // Default multiplier
-                
-                // Channel-specific realistic spend multipliers for pharma
-                if (channelName.toLowerCase().includes('tv')) {
-                    spendMultiplier = 0.15; // TV campaigns are expensive
-                } else if (channelName.toLowerCase().includes('hcp')) {
-                    spendMultiplier = 0.08; // HCP programs have moderate costs
-                } else if (channelName.toLowerCase().includes('speaker')) {
-                    spendMultiplier = 0.25; // Speaker programs are very expensive
-                } else if (channelName.toLowerCase().includes('display')) {
-                    spendMultiplier = 0.03; // Digital display is more cost-effective
-                } else if (channelName.toLowerCase().includes('search')) {
-                    spendMultiplier = 0.04; // Search has moderate CPC costs
-                }
-                
-                const estimatedSpend = avgActivity * spendMultiplier * Math.min(data.length, 52);
+                const estimatedSpend = calculateRealisticSpend(channelName, avgActivity, Math.min(data.length, 52));
                 latest52wSpend = `$${Math.round(estimatedSpend / 1000)}k`;
             }
         }
@@ -279,7 +269,7 @@ export const generateDemoFeatures = (approvedActivityChannels: string[]): Featur
 };
 
 // Generate realistic model leaderboard with believable performance metrics (activity channels only)
-export const generateDemoModels = (activityChannels: string[], userSelections?: UserColumnSelection, userContext?: string): ModelRun[] => {
+export const generateDemoModels = (activityChannels: string[], userSelections?: UserColumnSelection, userContext?: string, featureParams?: FeatureParams[]): ModelRun[] => {
     const models: ModelRun[] = [];
     let modelCounter = 1;
     
@@ -295,7 +285,28 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
             rsqRange: [0.78, 0.92],
             mapeRange: [7, 15],
             hasPValues: true,
-            commentary: (r2: number, mape: number, kpiCol?: string) => `Linear regression with statistical significance testing${kpiCol ? ` for ${kpiCol} prediction` : ''}. Strong interpretability with R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Ideal for stakeholder communication and coefficient interpretation.`
+            commentary: (r2: number, mape: number, kpiCol?: string, featureParams?: FeatureParams[], userContext?: string) => {
+                let base = `Linear regression with statistical significance testing${kpiCol ? ` for ${kpiCol} prediction` : ''}. Strong interpretability with R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE.`;
+                
+                // Add user instruction feedback
+                if (featureParams && featureParams.length > 0) {
+                    const highAdstockChannels = featureParams.filter(f => f.adstock > 0.6);
+                    const lowLagChannels = featureParams.filter(f => f.lag === 0);
+                    
+                    if (highAdstockChannels.length > 0) {
+                        base += ` ✓ Following your high adstock settings (${highAdstockChannels.map(f => f.channel).join(', ')}) for carryover modeling.`;
+                    }
+                    if (lowLagChannels.length > 0) {
+                        base += ` ✓ Respecting your immediate-impact channels (${lowLagChannels.slice(0,2).map(f => f.channel).join(', ')}).`;
+                    }
+                }
+                
+                if (userContext && userContext.toLowerCase().includes('conservative')) {
+                    base += ' ✓ Aligned with your conservative modeling approach.';
+                }
+                
+                return base;
+            }
         },
         {
             name: 'Bayesian Regression',
@@ -303,7 +314,18 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
             rsqRange: [0.76, 0.89],
             mapeRange: [8, 16],
             hasPValues: true,
-            commentary: (r2: number, mape: number, kpiCol?: string) => `Bayesian approach with uncertainty quantification${kpiCol ? ` for ${kpiCol} modeling` : ''}. R² = ${(r2*100).toFixed(1)}% with ${mape.toFixed(1)}% MAPE. Provides credible intervals and handles collinearity well.`
+            commentary: (r2: number, mape: number, kpiCol?: string, featureParams?: FeatureParams[], userContext?: string) => {
+                let base = `Bayesian approach with uncertainty quantification${kpiCol ? ` for ${kpiCol} modeling` : ''}. R² = ${(r2*100).toFixed(1)}% with ${mape.toFixed(1)}% MAPE.`;
+                
+                if (featureParams) {
+                    const sCurveChannels = featureParams.filter(f => f.transform === 'S-Curve');
+                    if (sCurveChannels.length > 0) {
+                        base += ` ✓ Modeling your S-Curve transforms (${sCurveChannels.slice(0,2).map(f => f.channel).join(', ')}) with Bayesian priors.`;
+                    }
+                }
+                
+                return base + ' Excellent for handling parameter uncertainty.';
+            }
         },
         {
             name: 'LightGBM',
@@ -311,7 +333,22 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
             rsqRange: [0.82, 0.94],
             mapeRange: [5, 12],
             hasPValues: false,
-            commentary: (r2: number, mape: number, kpiCol?: string) => `Gradient boosting with feature importance${kpiCol ? ` for ${kpiCol} optimization` : ''}. Superior performance: R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Captures non-linear interactions and saturation effects automatically.`
+            commentary: (r2: number, mape: number, kpiCol?: string, featureParams?: FeatureParams[], userContext?: string) => {
+                let base = `Gradient boosting with feature importance${kpiCol ? ` for ${kpiCol} optimization` : ''}. Superior performance: R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE.`;
+                
+                if (featureParams) {
+                    const powerChannels = featureParams.filter(f => f.transform === 'Power');
+                    if (powerChannels.length > 0) {
+                        base += ` ✓ Your Power transforms (${powerChannels.slice(0,2).map(f => f.channel).join(', ')}) work excellently with tree-based learning.`;
+                    }
+                }
+                
+                if (userContext && userContext.toLowerCase().includes('performance')) {
+                    base += ' ✓ Maximizing predictive accuracy as requested.';
+                }
+                
+                return base + ' Captures complex saturation patterns automatically.';
+            }
         },
         {
             name: 'NN',
@@ -319,7 +356,18 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
             rsqRange: [0.79, 0.91],
             mapeRange: [6, 14],
             hasPValues: false,
-            commentary: (r2: number, mape: number, kpiCol?: string) => `Neural network with regularization${kpiCol ? ` for ${kpiCol} prediction` : ''}. R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE. Excellent at modeling complex saturation curves and channel interactions.`
+            commentary: (r2: number, mape: number, kpiCol?: string, featureParams?: FeatureParams[], userContext?: string) => {
+                let base = `Neural network with regularization${kpiCol ? ` for ${kpiCol} prediction` : ''}. R² = ${(r2*100).toFixed(1)}% and ${mape.toFixed(1)}% MAPE.`;
+                
+                if (featureParams) {
+                    const highLagChannels = featureParams.filter(f => f.lag >= 2);
+                    if (highLagChannels.length > 0) {
+                        base += ` ✓ Neural layers effectively capture your lag settings (${highLagChannels.slice(0,2).map(f => f.channel).join(', ')}).`;
+                    }
+                }
+                
+                return base + ' Excellent at modeling complex channel interactions.';
+            }
         }
     ];
 
@@ -359,17 +407,23 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
                 return sum + (ch.efficiency * ch.contribution);
             }, 0) / channelDetails.reduce((sum, ch) => sum + ch.contribution, 0);
 
-            // Generate algorithm-appropriate model details
-            const modelDetails = channelDetails.map(ch => ({
-                name: ch.channel,
-                included: Math.random() > 0.15, // 85% inclusion rate (some models exclude weak channels)
-                contribution: ch.contribution * 100, // Convert to percentage
-                roi: ch.efficiency,
-                pValue: config.hasPValues ? Math.random() * 0.12 : null, // Only stats models have p-values
-                adstock: 0.2 + Math.random() * 0.6, // 0.2-0.8 range
-                lag: Math.floor(Math.random() * 4), // 0-3 weeks
-                transform: ['Log-transform', 'S-Curve', 'Power', 'Negative Exponential'][Math.floor(Math.random() * 4)] as any
-            }));
+            // Generate algorithm-appropriate model details using user's feature parameters when available
+            const modelDetails = channelDetails.map(ch => {
+                // Find user's feature settings for this channel
+                const userFeature = featureParams?.find(fp => fp.channel === ch.channel);
+                
+                return {
+                    name: ch.channel,
+                    included: Math.random() > 0.15, // 85% inclusion rate (some models exclude weak channels)
+                    contribution: ch.contribution * 100, // Convert to percentage
+                    roi: ch.efficiency,
+                    pValue: config.hasPValues ? Math.random() * 0.12 : null, // Only stats models have p-values
+                    // Use user's parameters with small variation to show realistic model differences
+                    adstock: userFeature ? userFeature.adstock + (Math.random() - 0.5) * 0.1 : 0.2 + Math.random() * 0.6,
+                    lag: userFeature ? Math.max(0, userFeature.lag + Math.floor((Math.random() - 0.5) * 2)) : Math.floor(Math.random() * 4),
+                    transform: userFeature ? userFeature.transform : ['Log-transform', 'S-Curve', 'Power', 'Negative Exponential'][Math.floor(Math.random() * 4)] as any
+                };
+            });
 
             models.push({
                 id: `${config.name.toLowerCase().replace(/\s+/g, '_')}_${variant}`,
@@ -377,7 +431,7 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
                 rsq: rsqVariation,
                 mape: mapeVariation,
                 roi: blendedRoi,
-                commentary: config.commentary(rsqVariation, mapeVariation, kpiCol || undefined),
+                commentary: config.commentary(rsqVariation, mapeVariation, kpiCol || undefined, featureParams, userContext),
                 details: modelDetails
             } as ModelRun);
             
