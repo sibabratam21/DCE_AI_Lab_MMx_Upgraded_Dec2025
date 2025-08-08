@@ -5,11 +5,11 @@
   "installCommand": "npm install",
   "devCommand": "npm run dev",
   "env": {
-    "GEMINI_API_KEY": "@gemini_api_key"
+    "GEMINI_API_KEY": "AIzaSyCBQ_Bc4t8rYJXU6487nQ3MAaCGui29Sbc"
   },
   "build": {
     "env": {
-      "GEMINI_API_KEY": "@gemini_api_key"
+      "GEMINI_API_KEY": "AIzaSyCBQ_Bc4t8rYJXU6487nQ3MAaCGui29Sbc"
     }
   }
 }
