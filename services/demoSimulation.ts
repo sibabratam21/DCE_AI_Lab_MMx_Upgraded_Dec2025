@@ -66,7 +66,8 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
 
     // Generate realistic channel diagnostics based on activity columns (spend only for ROI)
     const channelDiagnostics: ChannelDiagnostic[] = channelPairs.map((pair, index) => {
-        const channelName = pair.name;
+        // Use the actual activity column name for features and modeling
+        const channelName = pair.activityCol;
         
         // Calculate realistic sparsity based on activity data
         const activityValues = data.map(row => Number(row[pair.activityCol]) || 0);
@@ -120,7 +121,8 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
 
         // Generate realistic, business-friendly commentary based on metrics and channel type
         let commentary = "";
-        const channelLower = channelName.toLowerCase();
+        const displayName = pair.name; // Use the friendly display name for commentary
+        const channelLower = displayName.toLowerCase();
         
         if (channelLower.includes('tv')) {
             if (sparsityPct > 50) {
