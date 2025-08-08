@@ -43,7 +43,7 @@ const generateScenario = (
         .map(p => {
             // Use consistent spend calculation based on channel type and activity simulation
             const simulatedActivity = p.adstock * 10000 + p.lag * 2000 + 5000; // Simulated activity level
-            const currentSpend = calculateRealisticSpend(p.name, simulatedActivity, 52) / 1000; // Convert to M
+            const currentSpend = calculateRealisticSpend(p.name, simulatedActivity, 52) / 1000000; // Convert to M for display
             const spendMultiplier = spendMultiplierProfile(p.roi);
             const recommendedSpend = currentSpend * spendMultiplier;
             const change = recommendedSpend === 0 && currentSpend === 0 ? 0 : ((recommendedSpend - currentSpend) / currentSpend) * 100;

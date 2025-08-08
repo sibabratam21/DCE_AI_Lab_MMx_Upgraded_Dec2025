@@ -11,22 +11,29 @@ import { UserColumnSelection, ColumnType, EdaInsights, TrendDataPoint, ChannelDi
 
 // Centralized spend calculation for consistency across all tabs
 export const calculateRealisticSpend = (channelName: string, avgActivity: number, periodWeeks: number = 52): number => {
-    let spendMultiplier = 0.05; // Default multiplier
+    let baseSpendM = 5; // Default base spend in millions
     
-    // Channel-specific realistic spend multipliers for pharma
+    // Channel-specific realistic annual spend levels for pharma (in millions)
     if (channelName.toLowerCase().includes('tv')) {
-        spendMultiplier = 0.15; // TV campaigns are expensive
-    } else if (channelName.toLowerCase().includes('hcp')) {
-        spendMultiplier = 0.08; // HCP programs have moderate costs
+        baseSpendM = 25; // TV: $25M+ annually for major pharma
+    } else if (channelName.toLowerCase().includes('hcp') && channelName.toLowerCase().includes('call')) {
+        baseSpendM = 20; // HCP Calls: $20M+ for sales force
     } else if (channelName.toLowerCase().includes('speaker')) {
-        spendMultiplier = 0.25; // Speaker programs are very expensive
+        baseSpendM = 5; // Speaker programs: $5M for KOL events
+    } else if (channelName.toLowerCase().includes('hcp')) {
+        baseSpendM = 4; // Other HCP programs: $3-5M range
     } else if (channelName.toLowerCase().includes('display')) {
-        spendMultiplier = 0.03; // Digital display is more cost-effective
+        baseSpendM = 6; // Digital display: $6M+ (consumer/DTC)
     } else if (channelName.toLowerCase().includes('search')) {
-        spendMultiplier = 0.04; // Search has moderate CPC costs
+        baseSpendM = 4; // Search: $4M+ (consumer/DTC)
     }
     
-    return avgActivity * spendMultiplier * periodWeeks;
+    // Add activity-based variation (±30% based on activity levels)
+    const activityVariation = (avgActivity / 10000) * 0.3; // Normalize and scale
+    const finalSpendM = baseSpendM * (0.7 + activityVariation);
+    
+    // Scale by period (default assumes 52 weeks = full year)
+    return finalSpendM * (periodWeeks / 52) * 1000000; // Convert millions to dollars
 };
 
 // Realistic demo simulation for MMM diagnostics
