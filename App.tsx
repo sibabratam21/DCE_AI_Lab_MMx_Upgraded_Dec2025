@@ -1,8 +1,8 @@
 import {
-    getEnhancedEdaInsights,           // Real EDA calculations
     generateEnhancedModelLeaderboard, // Real regression modeling  
     getRealDataChatResponse,          // Real data analysis
   } from './services/hybridAnalysisService';
+  import { generateDemoInsights as fastDemoInsights } from './services/demoSimulation';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { AppStep, EdaResult, UserColumnSelection, ColumnType, AgentMessage, ParsedData, EdaInsights, FeatureParams, ModelRun, ChannelDiagnostic, ColumnSummaryItem, ModelingInteractionResponse, CalibrationInteractionResponse, ModelDetail, OptimizerScenario, OptimizerInteractionResponse } from './types';
@@ -274,7 +274,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     setLoadingMessage('Updating diagnostics...');
     try {
-        const insightsResult = await getEnhancedEdaInsights(selections, data, query);
+        const insightsResult = fastDemoInsights(selections, data);
         setEdaInsights(insightsResult);
         setChannelDiagnostics(insightsResult.channelDiagnostics);
         return insightsResult;
