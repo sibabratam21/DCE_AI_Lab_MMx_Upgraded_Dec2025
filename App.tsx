@@ -1123,6 +1123,8 @@ Review each channel's settings in the table below. Adjust based on your business
             const data = parseCSV(text);
             clearDataCache(); // Clear cache for uploaded CSV
             setParsedData(data);
+            // Set current dataset in store for report reconciliation
+            await setCurrentDataset(data);
             setCompletedSteps(prev => new Set(prev).add(AppStep.Welcome));
             setCurrentStep(AppStep.Configure);
             await handleColumnAnalysis(text);
