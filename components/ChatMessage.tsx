@@ -4,9 +4,10 @@ import { AiIcon } from './icons/AiIcon';
 
 interface ChatMessageProps {
   message: AgentMessage;
+  onActionClick?: (action: string) => void;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = ({ message, onActionClick }) => {
   const isAi = message.sender === 'ai';
 
   return (
@@ -24,6 +25,32 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         }`}
       >
         <div className={`prose prose-sm max-w-none whitespace-pre-wrap ${isAi ? '' : 'prose-invert'}`}>{message.text}</div>
+        
+        {/* Clickable Action Buttons */}
+        {message.actions && message.actions.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {message.actions.map((action, index) => (
+              <button
+                key={index}
+                onClick={() => {
+                  if (action.onClick) {
+                    action.onClick();
+                  } else {
+                    onActionClick?.(action.text);
+                  }
+                }}
+                disabled={action.disabled}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                  action.style === 'primary' 
+                    ? 'bg-[#EC7200] text-white border-[#EC7200] hover:bg-[#d86800]' 
+                    : 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {action.text}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

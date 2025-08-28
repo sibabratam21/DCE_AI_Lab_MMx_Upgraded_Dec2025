@@ -1,207 +1,258 @@
-import React from 'react';
-import { ModelRun, ModelDetail } from '../types';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Loader } from './Loader';
+import React, { useState, useMemo } from 'react';
+import { ModelRun, FeatureParams } from '../types';
+import { EnhancedModelLeaderboard } from './EnhancedModelLeaderboard';
+import { EnhancedModelDetails } from './EnhancedModelDetails';
+import { ModelCompare } from './ModelCompare';
+import { RecalibrationWizard } from './RecalibrationWizard';
+import { BaselineAwareRecalibrationWizard } from './BaselineAwareRecalibrationWizard';
+import { useValidatedModels } from '../services/modelValidationService';
+import { useModelProgress } from '../hooks/useModelProgress';
+import { trainModels } from '../services/trainingAPI';
 
 interface ModelingViewProps {
     models: ModelRun[];
+    selectedChannels: string[];
     activeModelId: string | null;
     onSetActiveModel: (id: string | null) => void;
     onModelChange: (model: ModelRun) => void;
     onRequestFinalize: () => void;
     isRecalibrating: boolean;
+    onRecalibrate: (selectedChannels?: string[], updatedParams?: FeatureParams[]) => void;
+    onModelsUpdated?: (newModels: ModelRun[]) => void; // Callback to append new models
+    currentFeaturesHash?: string;
+    currentRangesHash?: string;
+    featureParams: FeatureParams[];
+    currentStep?: string; // For triggering abort on tab changes
 }
 
-const chartColors = {
-  grid: 'rgba(26, 22, 40, 0.1)',
-  text: '#1A1628'
-}
 
-const ActiveModelDetail: React.FC<{ model: ModelRun; onModelChange: (model: ModelRun) => void; onRequestFinalize: () => void; isRecalibrating: boolean; }> = ({ model, onModelChange, onRequestFinalize, isRecalibrating }) => {
-    const [localModel, setLocalModel] = React.useState(model);
-    const [hasPendingChanges, setHasPendingChanges] = React.useState(false);
-
-    // Update local model when the prop changes (from recalibration result)
-    React.useEffect(() => {
-        setLocalModel(model);
-        setHasPendingChanges(false);
-    }, [model]);
+export const ModelingView: React.FC<ModelingViewProps> = ({ 
+    models, 
+    selectedChannels, 
+    activeModelId, 
+    onSetActiveModel, 
+    onModelChange, 
+    onRequestFinalize, 
+    isRecalibrating,
+    onRecalibrate,
+    currentFeaturesHash = '',
+    currentRangesHash = '',
+    featureParams,
+    currentStep = 'modeling',
+    onModelsUpdated
+}) => {
+    const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+    const [showCompare, setShowCompare] = useState(false);
+    const [showRecalibrationWizard, setShowRecalibrationWizard] = useState(false);
+    const [useBaselineWizard, setUseBaselineWizard] = useState(true); // Default to baseline-aware
     
-    const handleParameterChange = (channelName: string, field: keyof ModelDetail, value: any) => {
-        const newDetails = localModel.details.map(d =>
-            d.name === channelName ? { ...d, [field]: value } : d
+    // Staged progress hook - aborts on currentStep changes
+    const modelProgress = useModelProgress(currentStep);
+    
+    // Validate models and filter incomplete ones
+    const { validationService, isValidating } = useValidatedModels(models);
+    
+    // Use validated models for leaderboard (excludes incomplete models)
+    const validatedModels = validationService?.validModels || [];
+    const incompleteCount = validationService?.incompleteModelIds?.length || 0;
+    
+    // Active model from validated models only
+    const activeModel = validatedModels.find(m => m.id === activeModelId);
+    
+    // Check if active model is stale
+    const isActiveModelStale = useMemo(() => {
+        if (!activeModel || !activeModel.provenance) return false;
+        return activeModel.provenance.features_hash !== currentFeaturesHash || 
+               activeModel.provenance.ranges_hash !== currentRangesHash;
+    }, [activeModel, currentFeaturesHash, currentRangesHash]);
+    
+    const handleToggleModelSelection = (id: string) => {
+        setSelectedModelIds(prev => 
+            prev.includes(id) ? prev.filter(modelId => modelId !== id) : [...prev, id]
         );
-        setLocalModel({ ...localModel, details: newDetails });
-        setHasPendingChanges(true);
-    };
-
-    const handleRecalibrate = () => {
-        onModelChange(localModel);
-        setHasPendingChanges(false);
     };
     
-    const roiColor = model.roi > 0 ? 'text-green-600' : 'text-red-600';
-
-    return (
-        <div className="glass-pane p-6 h-full flex flex-col relative">
-            {isRecalibrating && (
-                <div className="absolute inset-0 bg-white/70 backdrop-blur-sm flex justify-center items-center rounded-lg z-10 transition-opacity">
-                    <div className="text-center">
-                        <Loader />
-                        <p className="mt-2 font-medium text-gray-600">Recalibrating model...</p>
-                    </div>
-                </div>
-            )}
-            <div className={`flex flex-col h-full ${isRecalibrating ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Active Model: {model.id} ({model.algo})</h3>
-                <p className="text-gray-600 mb-6 text-sm">{model.commentary}</p>
+    const handleCompareModels = () => {
+        setShowCompare(true);
+    };
+    
+    const handleRecalibrate = async (configOrChannels?: any, updatedParams?: FeatureParams[]) => {
+        // Handle both old API (selectedChannels, updatedParams) and new API (config object)
+        let selectedChannels: string[];
+        let paramRanges: FeatureParams[];
+        let baselineConfig: any = undefined;
+        
+        if (configOrChannels && typeof configOrChannels === 'object' && 'selectedChannels' in configOrChannels) {
+            // New baseline-aware API
+            const config = configOrChannels;
+            selectedChannels = config.selectedChannels;
+            paramRanges = config.paramRanges;
+            baselineConfig = config.baselineConfig;
+        } else {
+            // Legacy API
+            selectedChannels = configOrChannels || [];
+            paramRanges = updatedParams || featureParams;
+        }
+        setShowRecalibrationWizard(false);
+        
+        // Wrap the training API call in staged progress
+        try {
+            const result = await modelProgress.executeWithProgress(async () => {
+                // POST /train with baseline-aware configuration
+                const response = await trainModels({
+                    selectedChannels,
+                    paramRanges,
+                    baselineConfig,
+                    rationale: baselineConfig ? 'Baseline-aware recalibration' : 'Standard recalibration'
+                });
                 
-                <div className="grid grid-cols-3 gap-4 text-center mb-6">
-                    <div className="bg-gray-100 p-3 rounded-lg"><div className="text-sm text-gray-500">R-Square</div><div className="text-2xl font-bold text-[#32A29B]">{model.rsq.toFixed(2)}</div></div>
-                    <div className="bg-gray-100 p-3 rounded-lg"><div className="text-sm text-gray-500">MAPE</div><div className="text-2xl font-bold text-[#32A29B]">{model.mape.toFixed(1)}%</div></div>
-                    <div className="bg-gray-100 p-3 rounded-lg"><div className="text-sm text-gray-500">Blended ROI</div><div className={`text-2xl font-bold ${roiColor}`}>${model.roi.toFixed(2)}</div></div>
-                </div>
+                if (!response.success) {
+                    throw new Error(response.message);
+                }
                 
-                <div className="flex-grow overflow-y-auto custom-scrollbar pr-2 -mr-2 space-y-6">
-                    <div>
-                        <h4 className="font-semibold text-gray-800 mb-4">Channel Contribution</h4>
-                        <ResponsiveContainer width="100%" height={200}>
-                            <BarChart data={model.details} layout="vertical" margin={{ top: 5, right: 20, left: 30, bottom: 5 }}>
-                                <XAxis type="number" hide />
-                                <YAxis type="category" dataKey="name" width={100} stroke={chartColors.text} fontSize={12} interval={0} />
-                                <Tooltip wrapperClassName="glass-pane" cursor={{ fill: 'rgba(0,0,0, 0.05)' }} formatter={(value: number) => `${value.toFixed(1)}%`}/>
-                                <Bar dataKey="contribution" name="Contribution" stackId="a">
-                                    {model.details.map((p, index) => (
-                                        <Cell key={`cell-${index}`} fill={p.included ? (p.pValue != null && p.pValue > 0.1 ? '#f87171' : '#32A29B') : '#9ca3af'} />
-                                    ))}
-                                </Bar>
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
+                return response;
+            });
+            
+            if (result?.success && result.newModels.length > 0) {
+                // Append new candidates to existing models
+                if (onModelsUpdated) {
+                    onModelsUpdated(result.newModels);
+                }
+                
+                // Call original recalibrate to update parent state
+                onRecalibrate(selectedChannels, paramRanges);
+                
+                console.log(`[ModelingView] Successfully added ${result.newModels.length} new models`);
+            }
+        } catch (error) {
+            if (error instanceof Error && error.name !== 'AbortError') {
+                console.error('Recalibration failed:', error);
+                // Could show error toast here
+            }
+        }
+    };
+    
+    const handleShowRecalibrationWizard = () => {
+        setShowRecalibrationWizard(true);
+    };
+    
+    const selectedModels = models.filter(m => selectedModelIds.includes(m.id));
+    
+    // Listen for compare event from leaderboard
+    React.useEffect(() => {
+        const handleCompareEvent = () => {
+            setShowCompare(true);
+        };
+        
+        window.addEventListener('modelsCompare', handleCompareEvent);
+        return () => window.removeEventListener('modelsCompare', handleCompareEvent);
+    }, []);
 
-                    <div>
-                        <h4 className="font-semibold text-gray-800">Manual Parameter Calibration</h4>
-                        <div className="overflow-x-auto mt-4">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-gray-100 sticky top-0"><tr><th className="p-2">Channel</th><th className="p-2">Adstock</th><th className="p-2">Lag</th><th className="p-2">Transform</th></tr></thead>
-                                <tbody>
-                                    {localModel.details.map(p => (
-                                    <tr key={p.name} className="border-b border-gray-200">
-                                        <td className="py-2 px-2">
-                                            <label className="flex items-center">
-                                                <input type="checkbox" className="h-4 w-4 rounded bg-gray-200 border-gray-300 text-[#EC7200] focus:ring-[#EC7200]" checked={p.included} onChange={(e) => handleParameterChange(p.name, 'included', e.target.checked)} />
-                                                <span className="ml-2.5 font-semibold">{p.name}</span>
-                                                {p.pValue !== null && <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${p.pValue > 0.1 ? 'bg-red-500/20 text-red-700' : 'bg-green-500/20 text-green-700'}`}>p={p.pValue.toFixed(2)}</span>}
-                                            </label>
-                                        </td>
-                                        <td><input type="number" step="0.05" value={p.adstock} onChange={e => handleParameterChange(p.name, 'adstock', parseFloat(e.target.value))} className="w-20 p-1 bg-white border border-gray-300 rounded-md" /></td>
-                                        <td><input type="number" value={p.lag} onChange={e => handleParameterChange(p.name, 'lag', parseInt(e.target.value))} className="w-20 p-1 bg-white border border-gray-300 rounded-md" /></td>
-                                        <td>
-                                            <select value={p.transform} onChange={e => handleParameterChange(p.name, 'transform', e.target.value as any)} className="w-full p-1 bg-white border border-gray-300 rounded-md">
-                                                <option>Log-transform</option>
-                                                <option>Negative Exponential</option>
-                                                <option>S-Curve</option>
-                                                <option>Power</option>
-                                            </select>
-                                        </td>
-                                    </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+    // Gate rendering on loading state
+    if (modelProgress.loading) {
+        return (
+            <div className="flex h-full items-center justify-center p-6">
+                <div className="glass-pane p-8 max-w-md w-full text-center">
+                    <div className="mb-6">
+                        <div className="w-16 h-16 mx-auto mb-4">
+                            <div className="relative w-full h-full">
+                                <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
+                                <div 
+                                    className="absolute inset-0 border-4 border-[#EC7200] rounded-full border-t-transparent animate-spin"
+                                    style={{ transform: 'rotate(0deg)' }}
+                                ></div>
+                            </div>
                         </div>
+                        <h3 className="text-xl font-semibold text-gray-900 mb-2">{modelProgress.stage}</h3>
+                        <p className="text-gray-600 text-sm mb-4">{modelProgress.label}</p>
                     </div>
-                </div>
-
-                <div className="mt-auto pt-6 space-y-3">
-                    {hasPendingChanges && (
-                        <button
-                            onClick={handleRecalibrate}
-                            disabled={isRecalibrating}
-                            className="w-full bg-[#EC7200] hover:bg-[#EC7200]/90 text-white text-base font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {isRecalibrating ? 'Recalibrating...' : 'Recalibrate Model'}
-                        </button>
-                    )}
+                    
+                    <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+                        <div 
+                            className="bg-[#EC7200] h-2 rounded-full transition-all duration-300 ease-out"
+                            style={{ width: `${modelProgress.progress}%` }}
+                        ></div>
+                    </div>
+                    
+                    <div className="text-sm text-gray-500 mb-4">
+                        {Math.round(modelProgress.progress)}% complete
+                    </div>
+                    
                     <button
-                        onClick={onRequestFinalize}
-                        disabled={hasPendingChanges}
-                        className="w-full primary-button text-base font-semibold py-3 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={hasPendingChanges ? "Please recalibrate the model before finalizing" : ""}
+                        onClick={modelProgress.abort}
+                        className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                     >
-                        Finalize Model &amp; Generate Report
+                        Cancel Training
                     </button>
                 </div>
             </div>
-        </div>
-    );
-}
-
-export const ModelingView: React.FC<ModelingViewProps> = ({ models, activeModelId, onSetActiveModel, onModelChange, onRequestFinalize, isRecalibrating }) => {
-    
-    if (models.length === 0) {
-        return <p className="p-8 text-center">Waiting for model results...</p>;
+        );
     }
 
-    const activeModel = models.find(m => m.id === activeModelId);
-    
-    // Sort models to show the newest (calibrated) ones on top
-    const sortedModels = [...models].sort((a, b) => {
-        const aIsCalibrated = a.id.includes('_cal_');
-        const bIsCalibrated = b.id.includes('_cal_');
-        if (aIsCalibrated && !bIsCalibrated) return -1;
-        if (!aIsCalibrated && bIsCalibrated) return 1;
-        return 0; // Or add more sophisticated date-based sorting if needed
-    });
-
-
     return (
-        <div className="flex h-full p-4 md:p-6 gap-6">
-            {/* Leaderboard */}
-            <div className="w-1/2 flex flex-col glass-pane p-4">
-                <h2 className="text-xl font-bold text-center mb-4">Model Leaderboard</h2>
-                <div className="flex-grow overflow-y-auto custom-scrollbar pr-2 -mr-2">
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-gray-100 sticky top-0">
-                            <tr>
-                                <th className="p-2">Model ID</th>
-                                <th className="p-2">Algo</th>
-                                <th className="p-2">R-Sq</th>
-                                <th className="p-2">MAPE</th>
-                                <th className="p-2">ROI</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {sortedModels.map((model) => {
-                                const roiColor = model.roi < 0 ? 'text-red-600' : 'text-green-600';
-                                const isActive = model.id === activeModelId;
-                                return (
-                                <tr key={model.id} 
-                                    onClick={() => onSetActiveModel(model.id)}
-                                    className={`border-b border-gray-200 cursor-pointer transition-colors hover:bg-gray-100 ${isActive ? 'bg-[#EC7200]/10' : ''}`}>
-                                    <td className="p-2 font-semibold">{model.id}</td>
-                                    <td className="p-2 text-gray-500">{model.algo.replace(' Regression', '')}</td>
-                                    <td className="p-2 font-mono text-[#32A29B]">{model.rsq.toFixed(2)}</td>
-                                    <td className="p-2 font-mono text-[#32A29B]">{model.mape.toFixed(1)}%</td>
-                                    <td className={`p-2 font-mono ${roiColor}`}>${model.roi.toFixed(2)}</td>
-                                </tr>
-                                )
-                            })}
-                        </tbody>
-                    </table>
+        <>
+            <div className="flex h-full p-4 md:p-6 gap-6">
+                {/* Enhanced Leaderboard */}
+                <EnhancedModelLeaderboard
+                    models={validatedModels}
+                    selectedChannels={selectedChannels}
+                    activeModelId={activeModelId}
+                    selectedModelIds={selectedModelIds}
+                    onSetActiveModel={onSetActiveModel}
+                    onToggleModelSelection={handleToggleModelSelection}
+                    onRecalibrate={handleShowRecalibrationWizard}
+                    isRecalibrating={modelProgress.loading || isValidating}
+                    currentFeaturesHash={currentFeaturesHash}
+                    currentRangesHash={currentRangesHash}
+                />
+
+                {/* Enhanced Model Details */}
+                <div className="w-1/2">
+                    {activeModel ? (
+                        <EnhancedModelDetails
+                            model={activeModel}
+                            models={validatedModels}
+                            onRecalibrate={handleShowRecalibrationWizard}
+                            onRequestFinalize={onRequestFinalize}
+                            isRecalibrating={isRecalibrating}
+                            selectedChannels={selectedChannels}
+                            isStale={isActiveModelStale}
+                        />
+                    ) : (
+                        <div className="glass-pane h-full flex flex-col items-center justify-center text-center p-8">
+                            <h3 className="text-xl font-semibold text-gray-900">Select a Model</h3>
+                            <p className="text-gray-600 mt-2">Click a model from the leaderboard on the left to view its detailed results and diagnostics.</p>
+                            {incompleteCount > 0 && (
+                                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <p className="text-yellow-800 text-sm">
+                                        ⚠️ {incompleteCount} model{incompleteCount !== 1 ? 's' : ''} excluded due to validation failures
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
-
-            {/* Active Model Details & Calibration */}
-            <div className="w-1/2">
-                {activeModel ? (
-                    <ActiveModelDetail model={activeModel} onModelChange={onModelChange} onRequestFinalize={onRequestFinalize} isRecalibrating={isRecalibrating}/>
-                ) : (
-                    <div className="glass-pane h-full flex flex-col items-center justify-center text-center p-8">
-                        <h3 className="text-xl font-semibold text-gray-900">Select a Model</h3>
-                        <p className="text-gray-600 mt-2">Click a model from the leaderboard on the left to view its detailed results, ask questions about it, or tune its parameters.</p>
-                    </div>
-                )}
-            </div>
-        </div>
+            
+            {/* Model Compare Modal */}
+            {showCompare && selectedModels.length >= 2 && selectedModels.length <= 3 && (
+                <ModelCompare 
+                    models={selectedModels}
+                    onClose={() => setShowCompare(false)}
+                />
+            )}
+            
+            {/* Recalibration Wizard */}
+            {showRecalibrationWizard && (
+                <BaselineAwareRecalibrationWizard
+                    currentChannels={selectedChannels}
+                    featureParams={featureParams}
+                    activeModel={activeModel}
+                    onRecalibrate={handleRecalibrate}
+                    onCancel={() => setShowRecalibrationWizard(false)}
+                    isRecalibrating={modelProgress.loading}
+                />
+            )}
+        </>
     );
 };

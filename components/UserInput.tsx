@@ -44,7 +44,7 @@ export const UserInput: React.FC<UserInputProps> = ({ onSubmit, placeholder, dis
                             className="inline-flex items-center justify-center rounded-md h-8 w-8 text-white bg-[#EC7200] hover:bg-[#d86800] focus:outline-none focus:ring-2 focus:ring-[#EC7200] focus:ring-offset-2 focus:ring-offset-white disabled:opacity-50 disabled:hover:bg-transparent transition-all"
                             disabled={!value.trim() || disabled}
                         >
-                            <FiSend className="h-4 w-4" aria-hidden="true" />
+                            <FiSend size={16} />
                             <span className="sr-only">Send feedback</span>
                         </button>
                     </div>

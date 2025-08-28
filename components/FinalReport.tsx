@@ -1,7 +1,7 @@
 import React from 'react';
 import { ModelRun, ModelDetail } from '../types';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { calculateRealisticSpend } from '../services/demoSimulation';
+import { getConsistentChannelSpend } from '../services/demoSimulation';
 
 interface FinalReportProps {
     model: ModelRun | null;
@@ -55,10 +55,9 @@ export const FinalReport: React.FC<FinalReportProps> = ({ model, onGoToOptimizer
     }
 
     const includedChannels = model.details.filter(p => p.included);
-    // Use consistent spend calculation across all tabs
+    // Use consistent spend calculation across all tabs (matches validation tab)
     const totalSpend = includedChannels.reduce((sum, p) => {
-        const simulatedActivity = p.adstock * 10000 + p.lag * 2000 + 5000;
-        return sum + calculateRealisticSpend(p.name, simulatedActivity, 52) / 1000000; // Convert to M for display
+        return sum + getConsistentChannelSpend(p.name) / 1000000; // Convert to M for display
     }, 0);
     
     // Calculate normalized contributions to ensure they sum to 100% with base sales
@@ -74,9 +73,8 @@ export const FinalReport: React.FC<FinalReportProps> = ({ model, onGoToOptimizer
     const marketingImpact = totalImpact - baseImpact;
 
     const reportData = includedChannels.map(p => {
-        // Use consistent spend calculation
-        const simulatedActivity = p.adstock * 10000 + p.lag * 2000 + 5000;
-        const spend = calculateRealisticSpend(p.name, simulatedActivity, 52) / 1000000; // Convert to M for display
+        // Use consistent spend calculation that matches validation tab
+        const spend = getConsistentChannelSpend(p.name) / 1000000; // Convert to M for display
         const scaledContribution = p.contribution * contributionScale; // Scaled contribution percentage
         const attributedKPI = (scaledContribution / 100) * totalImpact;
         const impactPercentage = scaledContribution; // This will now properly sum to marketingPercentage (75%)

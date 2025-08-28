@@ -14,6 +14,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Set `GEMINI_API_KEY` in `.env.local` file for AI functionality
 - The Vite config automatically loads and exposes the API key to the app
 
+## Security & Access Control
+
+The application is password-protected with a login screen:
+- **Password:** `dce_ai_mmx_2025`
+- Authentication persists for the browser session
+- Login screen features professional design matching the app's branding
+- Session storage used for authentication state management
+
 ## Project Architecture
 
 This is a React-based Marketing Mix Modeling (MMM) application that provides a step-by-step workflow for analyzing marketing data and optimizing budgets.

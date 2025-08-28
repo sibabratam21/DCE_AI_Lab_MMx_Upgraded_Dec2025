@@ -41,33 +41,51 @@ export async function getEnhancedEdaInsights(
     selections[k] === ColumnType.MARKETING_ACTIVITY
   );
   
-  const prompt = `You are Maya, an expert Marketing Mix Modeling analyst. I've performed statistical calculations on marketing data, and I need you to provide enhanced business insights and commentary.
+  const prompt = `You are MixMind, an expert Marketing Mix Modeling analyst. I've performed real statistical calculations on marketing data, and I need you to provide enhanced business insights and a strategic diagnostic summary.
 
 **Real Statistical Results:**
 ${JSON.stringify(realInsights, null, 2)}
 
 **Marketing Activity Channels:** ${activityCols.join(', ')}
 **User Context:** ${userInput || 'None provided'}
+**Data Period:** Latest 12 months with 4-week rolling average smoothing
 
 **Your Task:**
-Enhance the diagnostics commentary for each channel with deeper business insights. Keep the calculated metrics exactly as provided, but improve the commentary to be more:
-1. Business-focused (what this means for marketing strategy)
-2. Actionable (specific recommendations)
-3. Context-aware (considering the user's situation)
+1. **Enhanced Channel Commentary:** Provide strategic, business-focused insights for each channel
+2. **Rich Diagnostic Summary:** Create a comprehensive, insightful summary that goes beyond generic statements
 
-Return the same JSON structure but with enhanced commentary fields that provide strategic insights based on the real statistical patterns.
+**Return TWO separate insights:**
 
-**Example Enhancement:**
-Instead of: "High volatility suggests heavily flighted campaigns"
-Provide: "High volatility (85.2% CV) indicates aggressive campaign flighting strategy. This pattern is common in seasonal businesses or when testing campaign intensities. Consider smoothing spend for more stable measurement, or ensure your MMM captures these flight patterns with appropriate lag settings."
+**For the Sales Trend Insights (salesTrendInsights field), focus on:**
+- **Sales Performance:** What's happening with sales trends and key drivers
+- **Growth Patterns:** Seasonal trends, momentum indicators, baseline health
+- **Market Response:** How sales are reacting to overall marketing activities
+- **Performance Concerns:** Any red flags or positive momentum in the data
 
-Return a JSON object matching the original EdaInsights structure with enhanced commentary.`;
+**For the Channel Execution Insights (channelExecutionInsights field), focus on:**
+- **Channel Activity Patterns:** Which channels are active/inactive and execution strategies
+- **Media Flight Analysis:** Campaign timing, pulsing vs. always-on patterns
+- **Channel Mix Balance:** Portfolio diversification and strategic alignment
+- **Execution Opportunities:** Specific tactical improvements for campaign optimization
+
+**Example Executional Summary:**
+"Sales are trending down 41% from baseline, signaling urgent need for media activation. TV shows strong burst patterns suggesting effective reach-building campaigns, while Digital runs consistently indicating good always-on strategy. HCP channels appear underutilized with sparse activity patterns - major opportunity to increase healthcare professional engagement. Recommend: Increase TV flight intensity during low-sales periods, maintain Digital consistency, and activate dormant HCP channels with targeted campaigns. Current execution suggests good channel diversification but missed opportunities in professional targeting."
+
+**Channel Commentary Guidelines:**
+- Link statistical patterns to business implications
+- Provide specific, actionable recommendations
+- Consider channel interactions and strategic role
+- Address measurement considerations for MMM
+
+Return enhanced JSON with strategic diagnostic summary and actionable channel insights.`;
 
   const insightsSchema = {
     type: Type.OBJECT,
     properties: {
       trendsSummary: { type: Type.STRING },
       diagnosticsSummary: { type: Type.STRING },
+      salesTrendInsights: { type: Type.STRING },
+      channelExecutionInsights: { type: Type.STRING },
       channelDiagnostics: {
         type: Type.ARRAY,
         items: {
@@ -95,7 +113,7 @@ Return a JSON object matching the original EdaInsights structure with enhanced c
         }
       }
     },
-    required: ['trendsSummary', 'diagnosticsSummary', 'channelDiagnostics', 'trendData']
+    required: ['trendsSummary', 'diagnosticsSummary', 'salesTrendInsights', 'channelExecutionInsights', 'channelDiagnostics', 'trendData']
   };
 
   try {
@@ -110,10 +128,10 @@ Return a JSON object matching the original EdaInsights structure with enhanced c
 
     const enhancedInsights = JSON.parse(response.text);
     
-    // Ensure we preserve the real trend data
+    // Ensure we preserve the real trend data with channel information
     return {
       ...enhancedInsights,
-      trendData: realInsights.trendData
+      trendData: realInsights.trendData // Contains weekly aggregated KPI + channel data
     };
   } catch (e) {
     console.error("Failed to enhance EDA insights:", e);
@@ -133,7 +151,7 @@ export async function generateEnhancedModelLeaderboard(
   const realModels = await runRealMMModeling(data, selections, features);
   
   // Then enhance with AI interpretation
-  const prompt = `You are Maya, an expert Marketing Mix Modeling consultant. I've run real statistical models on marketing data and need you to enhance the model commentary with business insights.
+  const prompt = `You are MixMind, an expert Marketing Mix Modeling consultant. I've run real statistical models on marketing data and need you to enhance the model commentary with business insights.
 
 **Real Model Results:**
 ${JSON.stringify(realModels.map(m => ({ 
@@ -225,15 +243,47 @@ Return the complete model objects with enhanced commentary only.`;
   }
 }
 
-// Cache for expensive statistical calculations
+// Cache for expensive statistical calculations with timestamp for debugging
 let dataCache: { 
   dataHash: string, 
   statistics: { [key: string]: any }, 
   correlations: { [key: string]: number },
-  numericColumns: string[] 
+  numericColumns: string[],
+  timestamp: number
 } | null = null;
 
+// Function to clear cache when new data is uploaded
+export function clearDataCache(): void {
+  dataCache = null;
+  console.log('Data cache cleared - ready for new dataset');
+}
+
 // Real data analysis for chat responses (optimized)
+// Helper function to clean up AI responses with poor formatting
+const cleanupResponse = (text: string): string => {
+  return text
+    // Replace LaTeX-style math notation with readable format
+    .replace(/\$\\sigma\s*=\s*([^$]+)\$/g, '(σ = $1)')
+    .replace(/\$\\mu\s*=\s*([^$]+)\$/g, '(μ = $1)') 
+    .replace(/\$([^$]+)\$/g, '$1') // Remove remaining $ wrapping
+    // Remove all markdown formatting for better readability
+    .replace(/\*\*(.+?)\*\*/g, '$1') // Remove bold formatting
+    .replace(/\*(.+?)\*/g, '$1') // Remove italic formatting
+    .replace(/###\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/##\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/#\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/•\s*/g, '') // Remove bullet points
+    .replace(/\*\s*/g, '') // Remove asterisk bullet points
+    .replace(/^\s*-\s*/gm, '') // Remove dash bullet points
+    .replace(/^\s*\d+\.\s*/gm, '') // Remove numbered lists
+    // Improve readability of technical terms
+    .replace(/\bstd\b/g, 'standard deviation')
+    .replace(/\bcv\b/g, 'coefficient of variation')
+    // Clean up extra whitespace
+    .replace(/\n{3,}/g, '\n\n') // Reduce multiple line breaks
+    .trim();
+};
+
 export async function getRealDataChatResponse(
   query: string, 
   currentStep: AppStep, 
@@ -244,8 +294,16 @@ export async function getRealDataChatResponse(
     return "I don't have any data to analyze yet. Please upload your CSV file first!";
   }
 
-  // Create simple hash of data to check if we can use cached results
-  const dataHash = `${data.length}_${Object.keys(data[0]).join('_')}`;
+  // Create content-aware hash to properly detect data changes
+  const dataHash = (() => {
+    if (data.length === 0) return 'empty';
+    // Include data length, column names, and sample of actual data values
+    const sampleRows = data.slice(0, Math.min(5, data.length));
+    const sampleData = sampleRows.map(row => 
+      Object.keys(row).slice(0, 5).map(key => String(row[key]).slice(0, 10)).join('|')
+    ).join('||');
+    return `${data.length}_${Object.keys(data[0]).join('_')}_${sampleData}`;
+  })();
   
   let statistics: { [key: string]: any };
   let correlations: { [key: string]: number };
@@ -253,10 +311,12 @@ export async function getRealDataChatResponse(
 
   // Use cached results if data hasn't changed
   if (dataCache && dataCache.dataHash === dataHash) {
+    console.log('Using cached statistical data from:', new Date(dataCache.timestamp).toLocaleTimeString());
     statistics = dataCache.statistics;
     correlations = dataCache.correlations;
     numericColumns = dataCache.numericColumns;
   } else {
+    console.log('Computing new statistical analysis - data changed or cache miss');
     // Perform statistical analysis only when data changes
     numericColumns = Object.keys(data[0]).filter(col => {
       const sampleValues = data.slice(0, 10).map(row => row[col]);
@@ -290,8 +350,9 @@ export async function getRealDataChatResponse(
       }
     }
 
-    // Cache the results
-    dataCache = { dataHash, statistics, correlations, numericColumns };
+    // Cache the results with timestamp
+    dataCache = { dataHash, statistics, correlations, numericColumns, timestamp: Date.now() };
+    console.log('Cached new statistical analysis at:', new Date().toLocaleTimeString());
   }
 
   // Create concise summary for AI (reduce payload size)
@@ -303,23 +364,23 @@ export async function getRealDataChatResponse(
     .filter(([,corr]) => Math.abs(corr) > 0.3)  // Only strong correlations
     .slice(0, 5);  // Limit to top 5
 
-  const prompt = `You are Maya, an expert data analyst. Answer the user's question using real statistical analysis.
+  const prompt = `You are MixMind, an expert data analyst. Answer the user's question using real statistical analysis.
 
-**User's Question:** "${query}"
+User's Question: "${query}"
 
-**Dataset:** ${data.length} rows, ${Object.keys(data[0]).length} columns
+Dataset: ${data.length} rows, ${Object.keys(data[0]).length} columns
 
-**Key Statistics:**
+Key Statistics:
 ${topColumns.map(([col, stats]) => 
   `${col}: μ=${stats.mean.toFixed(1)}, σ=${stats.std.toFixed(1)}`
 ).join(' | ')}
 
-**Notable Correlations:**
+Notable Correlations:
 ${significantCorrs.map(([pair, corr]) => `${pair}: ${corr.toFixed(2)}`).join(' | ')}
 
-**Context:** ${AppStep[currentStep]} step
+Context: ${AppStep[currentStep]} step
 
-Provide specific insights based on these real calculations. Be concise and actionable.`;
+IMPORTANT: Write a clean, readable response WITHOUT markdown formatting (no **, ••, ###, etc.). Use plain text with simple line breaks. Be concise, specific, and actionable. Keep under 200 words.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -327,12 +388,12 @@ Provide specific insights based on these real calculations. Be concise and actio
       contents: prompt
     });
 
-    return response.text;
+    return cleanupResponse(response.text);
   } catch (e) {
     console.error("Failed to generate chat response:", e);
     // Efficient fallback using cached statistics
     const topCols = numericColumns.slice(0, 3);
-    return `Based on your data: ${data.length} rows, ${numericColumns.length} numeric columns. Key metrics: ${topCols.map(col => `${col} (μ=${statistics[col].mean.toFixed(1)})`).join(', ')}. Ask me specific questions!`;
+    return cleanupResponse(`Based on your data: ${data.length} rows, ${numericColumns.length} numeric columns. Key metrics: ${topCols.map(col => `${col} (μ=${statistics[col].mean.toFixed(1)})`).join(', ')}. Ask me specific questions!`);
   }
 }
 
@@ -354,7 +415,7 @@ export async function getEnhancedModelingInteraction(
       .map(d => ({ name: d.name, contribution: d.contribution, roi: d.roi }))
   }));
 
-  const prompt = `You are Maya, an MMM expert analyzing real model results. I need you to respond to the user's query about these actual model performances.
+  const prompt = `You are MixMind, an MMM expert analyzing real model results. I need you to respond to the user's query about these actual model performances.
 
 **Real Model Performance Data:**
 ${JSON.stringify(modelDataContext, null, 2)}

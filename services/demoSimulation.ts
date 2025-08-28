@@ -1,4 +1,24 @@
 import { UserColumnSelection, ColumnType, EdaInsights, TrendDataPoint, ChannelDiagnostic, ParsedData, FeatureParams, ModelRun, OptimizerScenario } from '../types';
+import { convertModelRunToDTO, validateModelData } from './activeModelAPI';
+import type { ActiveModelResponse } from '../types/api';
+
+// Helper function to clean up markdown formatting
+const cleanupResponse = (text: string): string => {
+  return text
+    // Remove all markdown formatting for better readability
+    .replace(/\*\*(.+?)\*\*/g, '$1') // Remove bold formatting
+    .replace(/\*(.+?)\*/g, '$1') // Remove italic formatting
+    .replace(/###\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/##\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/#\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/•\s*/g, '') // Remove bullet points
+    .replace(/\*\s*/g, '') // Remove asterisk bullet points
+    .replace(/^\s*-\s*/gm, '') // Remove dash bullet points
+    .replace(/^\s*\d+\.\s*/gm, '') // Remove numbered lists
+    // Clean up extra whitespace
+    .replace(/\n{3,}/g, '\n\n') // Reduce multiple line breaks
+    .trim();
+};
 
 /**
  * SPEND vs ACTIVITY SEPARATION LOGIC:
@@ -8,6 +28,56 @@ import { UserColumnSelection, ColumnType, EdaInsights, TrendDataPoint, ChannelDi
  * 
  * This ensures we model media activity effects properly while tracking spend for business ROI.
  */
+
+// Global channel spend cache for consistency across tabs
+const channelSpendCache: { [channelName: string]: number } = {};
+
+// Extract spend amount from validation diagnostic string (e.g., "$25M" -> 25000000)
+export const parseSpendFromDiagnostic = (spendString: string): number => {
+    if (!spendString || spendString === "Activity Only" || spendString === "N/A") {
+        return 0;
+    }
+    
+    const match = spendString.match(/\$(\d+(?:\.\d+)?)([kKmM])?/);
+    if (!match) return 0;
+    
+    const value = parseFloat(match[1]);
+    const unit = match[2]?.toLowerCase();
+    
+    if (unit === 'k') return value * 1000;
+    if (unit === 'm') return value * 1000000;
+    return value;
+};
+
+// Store validation spend data for use across all tabs
+export const cacheChannelSpends = (channelDiagnostics: ChannelDiagnostic[]) => {
+    channelDiagnostics.forEach(diagnostic => {
+        const extendedDiagnostic = diagnostic as ChannelDiagnostic & { latest52wSpend?: string };
+        if (extendedDiagnostic.latest52wSpend) {
+            const spendAmount = parseSpendFromDiagnostic(extendedDiagnostic.latest52wSpend);
+            if (spendAmount > 0) {
+                channelSpendCache[diagnostic.name] = spendAmount;
+            }
+        }
+    });
+};
+
+// Get cached spend for a channel, fallback to calculation if not cached
+export const getConsistentChannelSpend = (channelName: string, avgActivity?: number): number => {
+    // First try to get from cache (validation data)
+    if (channelSpendCache[channelName]) {
+        return channelSpendCache[channelName];
+    }
+    
+    // Fallback to calculation if not cached
+    if (avgActivity !== undefined) {
+        return calculateRealisticSpend(channelName, avgActivity, 52);
+    }
+    
+    // Last resort - use default calculation with simulated activity
+    const simulatedActivity = 10000; // Default activity level
+    return calculateRealisticSpend(channelName, simulatedActivity, 52);
+};
 
 // Centralized spend calculation for consistency across all tabs
 export const calculateRealisticSpend = (channelName: string, avgActivity: number, periodWeeks: number = 52): number => {
@@ -146,57 +216,104 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
             }
         }
 
-        // Generate realistic, business-friendly commentary based on metrics and channel type
+        // Generate dynamic, data-driven commentary with modeling insights
         let commentary = "";
         const displayName = pair.name; // Use the friendly display name for commentary
         const channelLower = displayName.toLowerCase();
         
+        // Calculate actual metrics for dynamic commentary
+        const hasHighSparsity = sparsityPct > 50;
+        const hasMediumSparsity = sparsityPct > 20 && sparsityPct <= 50;
+        const hasLowSparsity = sparsityPct <= 20;
+        const hasHighVolatility = cv > 70;
+        const hasMediumVolatility = cv > 40 && cv <= 70;
+        const hasLowVolatility = cv <= 40;
+        
+        // Build base commentary based on actual data patterns
+        let baseInsight = "";
+        let modelingImplication = "";
+        
         if (channelLower.includes('tv')) {
-            if (sparsityPct > 50) {
-                commentary = "TV campaigns show flighted pattern - strong brand-building during key launch periods with smart budget management.";
-            } else if (cv > 60) {
-                commentary = "Dynamic TV investment strategy with burst activity during high-impact moments, optimizing for maximum reach.";
+            if (hasHighSparsity && hasHighVolatility) {
+                baseInsight = `TV shows ${sparsityPct}% zero periods with ${cv.toFixed(0)}% volatility - highly flighted campaigns targeting specific launch windows.`;
+                modelingImplication = " → Model consideration: High adstock (0.7+) needed to capture brand halo effects between flights. Consider 2-3 week lag for full impact measurement.";
+            } else if (hasHighVolatility) {
+                baseInsight = `TV investment varies by ${cv.toFixed(0)}% weekly, indicating burst strategies during key moments.`;
+                modelingImplication = " → Model consideration: Use S-curve transformation to capture saturation at peak spend levels. Monitor for overspending in high-burst periods.";
+            } else if (hasLowSparsity && hasLowVolatility) {
+                baseInsight = `TV maintains consistent presence with only ${sparsityPct}% gaps and ${cv.toFixed(0)}% variation.`;
+                modelingImplication = " → Model consideration: Stable base makes it ideal for baseline estimation. Lower adstock (0.4-0.6) may suffice due to continuous presence.";
             } else {
-                commentary = "Steady TV presence building consistent brand awareness with reliable audience reach and frequency optimization.";
+                baseInsight = `TV shows ${sparsityPct}% zero periods with ${cv.toFixed(0)}% spending variation.`;
+                modelingImplication = " → Model consideration: Mixed pattern suggests testing multiple decay rates. Validate carryover against campaign calendar.";
             }
         } else if (channelLower.includes('display')) {
-            if (sparsityPct > 40) {
-                commentary = "Strategic display advertising with targeted campaign flights, focusing budget on key conversion windows.";
-            } else if (cv > 70) {
-                commentary = "Agile display strategy with performance-driven budget allocation responding to real-time market opportunities.";
+            if (hasHighSparsity) {
+                baseInsight = `Display runs in ${100-sparsityPct}% of periods with ${cv.toFixed(0)}% spend volatility - selective targeting strategy.`;
+                modelingImplication = " → Model consideration: Sparse data may cause unstable coefficients. Consider aggregating with similar digital channels or using regularization.";
+            } else if (hasHighVolatility) {
+                baseInsight = `Display shows ${cv.toFixed(0)}% volatility with ${sparsityPct}% downtime - performance-driven optimization in action.`;
+                modelingImplication = " → Model consideration: High variation ideal for response curve estimation. Use power or log transformation to capture diminishing returns.";
             } else {
-                commentary = "Consistent programmatic display presence maintaining brand visibility across the customer journey.";
+                baseInsight = `Display maintains ${100-sparsityPct}% coverage with ${cv.toFixed(0)}% spend stability.`;
+                modelingImplication = " → Model consideration: Consistent signal enables reliable attribution. Test immediate (lag 0) vs short-term (lag 1) response patterns.";
             }
         } else if (channelLower.includes('search') || channelLower.includes('paidsearch')) {
-            if (cv > 50) {
-                commentary = "Responsive paid search strategy with smart bid adjustments based on competitive landscape and seasonality.";
+            if (hasLowVolatility) {
+                baseInsight = `Search shows remarkably stable investment (${cv.toFixed(0)}% CV) capturing consistent demand.`;
+                modelingImplication = " → Model consideration: Low volatility perfect for baseline ROI. Minimal adstock (0.1-0.2) as search is direct response.";
             } else {
-                commentary = "Stable search presence capturing high-intent customers with consistent keyword coverage and optimization.";
+                baseInsight = `Search varies by ${cv.toFixed(0)}% with ${sparsityPct}% inactive periods - adaptive bidding strategy.`;
+                modelingImplication = " → Model consideration: Volatility helps identify elasticity. Use log transformation and test same-week impact (lag 0).";
             }
         } else if (channelLower.includes('hcp')) {
             if (channelLower.includes('call')) {
-                commentary = "Professional sales engagement with strategic rep deployment targeting high-value prescribers for maximum impact.";
+                if (hasHighSparsity) {
+                    baseInsight = `HCP calls active in ${100-sparsityPct}% of periods with ${cv.toFixed(0)}% effort variation - targeted territory focus.`;
+                    modelingImplication = " → Model consideration: Sparse calls may indicate pilot programs. Consider geographic clustering or pooling for stability.";
+                } else {
+                    baseInsight = `HCP calls show ${sparsityPct}% gaps with ${cv.toFixed(0)}% effort changes - consistent field force deployment.`;
+                    modelingImplication = " → Model consideration: Professional detailing has 2-4 week prescription lag. High adstock (0.6+) captures relationship building.";
+                }
             } else if (channelLower.includes('email')) {
-                commentary = "Targeted digital outreach to healthcare professionals with personalized content driving engagement and education.";
+                baseInsight = `HCP email shows ${sparsityPct}% inactive periods with ${cv.toFixed(0)}% send variation.`;
+                modelingImplication = " → Model consideration: Digital HCP has 1-week lag typically. Lower adstock (0.2-0.3) due to inbox saturation effects.";
             } else if (channelLower.includes('social')) {
-                commentary = "Strategic HCP social media engagement building thought leadership and professional community connections.";
+                baseInsight = `HCP social engagement varies by ${cv.toFixed(0)}% with ${100-sparsityPct}% active weeks.`;
+                modelingImplication = " → Model consideration: Social amplification suggests moderate adstock (0.3-0.4). Test interaction effects with other HCP channels.";
             } else {
-                commentary = "Comprehensive HCP engagement strategy combining multiple touchpoints for maximum professional influence.";
+                baseInsight = `HCP channel shows ${sparsityPct}% downtime with ${cv.toFixed(0)}% activity variation.`;
+                modelingImplication = " → Model consideration: Professional channels need longer attribution windows. Consider 2-3 week lags for prescription impact.";
             }
         } else if (channelLower.includes('speaker')) {
-            commentary = "High-impact speaker program delivering clinical education and building key opinion leader relationships for long-term influence.";
-        } else {
-            // Generic marketing commentary
-            if (sparsityPct > 50) {
-                commentary = "Campaign shows strategic flight patterns, concentrating investment during optimal market conditions for maximum ROI.";
-            } else if (cv > 80) {
-                commentary = "Dynamic investment approach with agile budget allocation responding to performance signals and market opportunities.";
-            } else if (sparsityPct < 20 && cv < 40) {
-                commentary = "Consistent always-on strategy maintaining steady market presence with reliable performance and brand building.";
+            if (hasHighSparsity) {
+                baseInsight = `Speaker programs run in ${100-sparsityPct}% of periods - selective high-value KOL events.`;
+                modelingImplication = " → Model consideration: Sporadic but high-impact. Use high adstock (0.7-0.9) for long-term influence. May need 3-4 week lag.";
             } else {
-                commentary = "Balanced campaign approach combining consistent baseline activity with strategic investment peaks for optimal impact.";
+                baseInsight = `Speaker programs show ${cv.toFixed(0)}% variation across ${100-sparsityPct}% active periods.`;
+                modelingImplication = " → Model consideration: Regular programs build cumulative credibility. S-curve captures event capacity constraints.";
+            }
+        } else {
+            // Generic channel with data-driven insights
+            if (hasHighSparsity && hasHighVolatility) {
+                baseInsight = `Channel active only ${100-sparsityPct}% of time with ${cv.toFixed(0)}% spend swings - highly tactical execution.`;
+                modelingImplication = " → Model consideration: Sparse, volatile data challenges modeling. Consider grouping with similar channels or using Bayesian priors for stability.";
+            } else if (hasHighSparsity) {
+                baseInsight = `Channel shows ${sparsityPct}% zero periods - flighted campaign strategy with focused bursts.`;
+                modelingImplication = " → Model consideration: Gaps between flights require careful adstock tuning. Test 0.5-0.7 range to bridge campaign periods.";
+            } else if (hasHighVolatility) {
+                baseInsight = `Channel volatility at ${cv.toFixed(0)}% indicates dynamic optimization based on performance.`;
+                modelingImplication = " → Model consideration: High variance excellent for response curve fitting. Use flexible transformations (power/s-curve).";
+            } else if (hasLowSparsity && hasLowVolatility) {
+                baseInsight = `Channel maintains steady presence - ${sparsityPct}% gaps, ${cv.toFixed(0)}% variation showing disciplined execution.`;
+                modelingImplication = " → Model consideration: Stable signal ideal for MMM. Can reliably estimate both base and incremental effects.";
+            } else {
+                baseInsight = `Channel shows ${sparsityPct}% inactive periods with ${cv.toFixed(0)}% spending variation.`;
+                modelingImplication = " → Model consideration: Moderate pattern allows standard MMM approaches. Test multiple transformation types for best fit.";
             }
         }
+        
+        commentary = baseInsight + modelingImplication;
 
         return {
             name: channelName,
@@ -217,43 +334,155 @@ export const generateDemoInsights = (selections: UserColumnSelection, data: Pars
         kpi: Number(row[kpiCol!]) || 0,
     })).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    // Generate business-friendly summaries
+    // Generate dynamic summaries based on actual data patterns
     const avgKpi = trendData.reduce((sum, point) => sum + point.kpi, 0) / trendData.length;
     const recentKpi = trendData.slice(-13).reduce((sum, point) => sum + point.kpi, 0) / 13;
     const trendPercentage = ((recentKpi - avgKpi) / avgKpi * 100);
     
+    // Calculate additional trend metrics for richer insights
+    const maxKpi = Math.max(...trendData.map(d => d.kpi));
+    const minKpi = Math.min(...trendData.map(d => d.kpi));
+    const range = maxKpi - minKpi;
+    const volatility = (range / avgKpi) * 100;
+    
+    // Detect trend direction over last quarter
+    const q1Avg = trendData.slice(-13, -9).reduce((sum, p) => sum + p.kpi, 0) / 4;
+    const q2Avg = trendData.slice(-9, -5).reduce((sum, p) => sum + p.kpi, 0) / 4;
+    const q3Avg = trendData.slice(-5).reduce((sum, p) => sum + p.kpi, 0) / Math.min(5, trendData.slice(-5).length);
+    const isAccelerating = q3Avg > q2Avg && q2Avg > q1Avg;
+    const isDecelerating = q3Avg < q2Avg && q2Avg < q1Avg;
+    
     let trendsSummary = "";
-    if (Math.abs(trendPercentage) < 5) {
-        trendsSummary = `${kpiCol} performance has been remarkably stable over the analysis period, averaging ${avgKpi.toFixed(0)} units weekly. This consistency suggests strong baseline demand and effective marketing equilibrium across channels.`;
+    if (Math.abs(trendPercentage) < 5 && volatility < 20) {
+        trendsSummary = `${kpiCol} shows remarkable stability with ${avgKpi.toFixed(0)} weekly average and only ${volatility.toFixed(1)}% range variation. This consistency (${trendPercentage > 0 ? '+' : ''}${trendPercentage.toFixed(1)}% recent trend) indicates mature market dynamics with predictable baseline, ideal for MMM coefficient estimation.`;
+    } else if (trendPercentage > 15) {
+        if (isAccelerating) {
+            trendsSummary = `${kpiCol} demonstrates accelerating growth momentum - ${trendPercentage.toFixed(1)}% above baseline with sequential quarterly improvements. Latest performance (${recentKpi.toFixed(0)} weekly avg) suggests successful market capture. Peak at ${maxKpi.toFixed(0)} shows upside potential still available.`;
+        } else {
+            trendsSummary = `${kpiCol} shows strong ${trendPercentage.toFixed(1)}% growth vs baseline (${avgKpi.toFixed(0)} historical avg). Recent performance averaging ${recentKpi.toFixed(0)} weekly with ${volatility.toFixed(1)}% volatility range. Growth pattern indicates effective media mix driving incremental volume.`;
+        }
     } else if (trendPercentage > 0) {
-        trendsSummary = `${kpiCol} shows encouraging ${trendPercentage > 15 ? 'strong' : 'positive'} momentum with ${trendPercentage.toFixed(1)}% growth trend. Recent 3-month performance (${recentKpi.toFixed(0)} avg weekly) outpaces historical baseline, indicating successful marketing optimization and market expansion.`;
+        trendsSummary = `${kpiCol} trending positively at ${trendPercentage.toFixed(1)}% above ${avgKpi.toFixed(0)} baseline. Current ${recentKpi.toFixed(0)} weekly average with ${volatility.toFixed(1)}% volatility suggests stable growth trajectory. Range from ${minKpi.toFixed(0)} to ${maxKpi.toFixed(0)} provides good variance for response curve fitting.`;
+    } else if (trendPercentage < -10) {
+        if (isDecelerating) {
+            trendsSummary = `${kpiCol} facing sustained pressure with ${Math.abs(trendPercentage).toFixed(1)}% decline and accelerating downward trend. Current ${recentKpi.toFixed(0)} vs ${avgKpi.toFixed(0)} historical average signals urgent optimization need. High ${volatility.toFixed(1)}% volatility suggests unstable market conditions.`;
+        } else {
+            trendsSummary = `${kpiCol} declined ${Math.abs(trendPercentage).toFixed(1)}% from ${avgKpi.toFixed(0)} baseline to current ${recentKpi.toFixed(0)} weekly average. Performance range ${minKpi.toFixed(0)}-${maxKpi.toFixed(0)} with ${volatility.toFixed(1)}% volatility indicates optimization opportunities through media mix refinement.`;
+        }
     } else {
-        trendsSummary = `${kpiCol} has experienced a ${Math.abs(trendPercentage).toFixed(1)}% decline from baseline levels, presenting optimization opportunities. Current performance suggests market headwinds or potential for media mix refinement to restore growth trajectory.`;
+        trendsSummary = `${kpiCol} relatively flat with ${Math.abs(trendPercentage).toFixed(1)}% variance from ${avgKpi.toFixed(0)} baseline. Current performance at ${recentKpi.toFixed(0)} weekly with ${volatility.toFixed(1)}% range volatility. Stable but uninspiring trend suggests need for strategic media mix evolution.`;
     }
     
-    const activeChannels = channelDiagnostics.filter(d => !d.sparsity.includes('100%')).length;
-    const highPerformers = channelDiagnostics.filter(d => !d.sparsity.includes('100%') && !d.volatility.includes('N/A')).length;
+    // Dynamic channel health assessment
+    const activeChannels = channelDiagnostics.filter(d => {
+        const sparsityNum = parseInt(d.sparsity.replace('% zeros', ''));
+        return sparsityNum < 100;
+    });
     
-    const diagnosticsSummary = `Marketing data ecosystem shows excellent health with ${activeChannels} active channels providing rich signal for MMM analysis. Channel diversity and consistent activity patterns indicate a well-balanced media mix positioned for accurate attribution modeling and optimization insights.`;
+    const sparseChannels = activeChannels.filter(d => {
+        const sparsityNum = parseInt(d.sparsity.replace('% zeros', ''));
+        return sparsityNum > 50;
+    });
+    
+    const volatileChannels = activeChannels.filter(d => {
+        const cvMatch = d.volatility.match(/(\d+\.?\d*)/);
+        const cv = cvMatch ? parseFloat(cvMatch[1]) : 0;
+        return cv > 70;
+    });
+    
+    const stableChannels = activeChannels.filter(d => {
+        const sparsityNum = parseInt(d.sparsity.replace('% zeros', ''));
+        const cvMatch = d.volatility.match(/(\d+\.?\d*)/);
+        const cv = cvMatch ? parseFloat(cvMatch[1]) : 0;
+        return sparsityNum < 20 && cv < 40;
+    });
+    
+    let diagnosticsSummary = "";
+    
+    if (activeChannels.length === 0) {
+        diagnosticsSummary = `Critical data issue: No active marketing channels detected. Please verify data upload and column mappings.`;
+    } else if (sparseChannels.length > activeChannels.length * 0.5) {
+        diagnosticsSummary = `Data shows ${activeChannels.length} channels but ${sparseChannels.length} have >50% zero periods, indicating highly flighted campaigns. This sparsity pattern requires careful modeling with regularization and potentially channel pooling for stable coefficients. Consider testing Bayesian methods for sparse data handling.`;
+    } else if (volatileChannels.length > activeChannels.length * 0.5) {
+        diagnosticsSummary = `Marketing mix includes ${activeChannels.length} channels with ${volatileChannels.length} showing >70% volatility. High variation excellent for response curve estimation but may indicate unstable spending patterns. Recommend testing multiple saturation curves and validating against known campaign calendars.`;
+    } else if (stableChannels.length > activeChannels.length * 0.7) {
+        diagnosticsSummary = `Exceptional data quality with ${activeChannels.length} channels, ${stableChannels.length} showing stable patterns (<20% sparsity, <40% CV). This consistency enables robust MMM with reliable attribution. Low noise ideal for detecting incremental effects and interaction terms.`;
+    } else {
+        diagnosticsSummary = `Balanced marketing dataset with ${activeChannels.length} active channels: ${stableChannels.length} stable, ${sparseChannels.length} flighted, ${volatileChannels.length} dynamic. Mixed patterns provide good signal diversity for MMM while requiring channel-specific transformation strategies.`;
+    }
 
-    return {
+    const insights = {
         trendData,
         trendsSummary,
         diagnosticsSummary,
         channelDiagnostics: channelDiagnostics as ChannelDiagnostic[]
     };
+    
+    // Cache the spend data for consistency across tabs
+    cacheChannelSpends(insights.channelDiagnostics);
+    
+    return insights;
 };
 
 // Generate realistic feature engineering recommendations (activity channels only)
 export const generateDemoFeatures = (approvedActivityChannels: string[]): FeatureParams[] => {
-    const channelDefaults: { [key: string]: { adstock: number; lag: number; transform: string; rationale: string } } = {
-        'TV': { adstock: 0.7, lag: 1, transform: 'S-Curve', rationale: 'TV has strong carryover effects and exhibits diminishing returns at high spend levels.' },
-        'Display': { adstock: 0.4, lag: 1, transform: 'Negative Exponential', rationale: 'Display advertising has brand awareness carryover with exponential decay patterns.' },
-        'PaidSearch': { adstock: 0.1, lag: 0, transform: 'Log-transform', rationale: 'Paid search is direct response with minimal carryover and clear diminishing returns.' },
-        'HCPCalls': { adstock: 0.6, lag: 2, transform: 'S-Curve', rationale: 'HCP outreach has strong professional influence with 2-week lag for prescription decisions.' },
-        'Speaker': { adstock: 0.8, lag: 3, transform: 'S-Curve', rationale: 'Speaker events build long-term credibility with extended carryover effects.' },
-        'HCPEmail': { adstock: 0.2, lag: 1, transform: 'Log-transform', rationale: 'Digital HCP communication has quick response with moderate diminishing returns.' },
-        'HCPSocial': { adstock: 0.3, lag: 1, transform: 'Power', rationale: 'HCP social engagement has flexible response curves with short carryover.' }
+    const channelDefaults: { [key: string]: { adstock: { min: number; max: number }; lag: { min: number; max: number }; transform: string; rationale: string } } = {
+        'TV': { 
+            adstock: { min: 0.5, max: 0.8 }, 
+            lag: { min: 0, max: 2 }, 
+            transform: 'S-Curve', 
+            rationale: cleanupResponse(`Why 0.5-0.8 adstock range: TV builds brand awareness with 3-6 week persistence. Range allows testing immediate vs sustained carryover effects.
+Why 0-2 week lag range: Captures immediate awareness through delayed purchase behavior patterns.
+Watchout: If TV is heavily flighted, narrow adstock range to 0.4-0.6 to avoid overestimating carryover during off-periods.`)
+        },
+        'Display': { 
+            adstock: { min: 0.2, max: 0.5 }, 
+            lag: { min: 0, max: 2 }, 
+            transform: 'Negative Exponential', 
+            rationale: cleanupResponse(`Why 0.2-0.5 adstock range: Display ads show moderate brand recall, testing 1-3 week persistence patterns.
+Why 0-2 week lag range: Click-to-conversion journey varies from immediate to consideration periods.
+Watchout: High frequency campaigns may show fatigue - if range includes negative coefficients, consider upper bound reduction.`)
+        },
+        'PaidSearch': { 
+            adstock: { min: 0.0, max: 0.2 }, 
+            lag: { min: 0, max: 1 }, 
+            transform: 'Log-transform', 
+            rationale: cleanupResponse(`Why 0.0-0.2 adstock range: Search is intent-driven with minimal carryover, testing immediate vs short-term brand effects.
+Why 0-1 week lag range: Same-session conversions vs brief consideration periods for high-value items.
+Watchout: Brand vs non-brand keywords behave differently. Consider separate parameter ranges if you have the data.`)
+        },
+        'HCPCalls': { 
+            adstock: { min: 0.4, max: 0.7 }, 
+            lag: { min: 1, max: 3 }, 
+            transform: 'S-Curve', 
+            rationale: cleanupResponse(`Why 0.4-0.7 adstock range: Face-to-face HCP interactions build relationships with 3-6 week persistence variability.
+Why 1-3 week lag range: Prescription decisions happen at next patient visits with varying appointment schedules.
+Watchout: If call frequency is low, consider 0.6-0.8 range to bridge longer gaps between interactions.`)
+        },
+        'Speaker': { 
+            adstock: { min: 0.6, max: 0.9 }, 
+            lag: { min: 2, max: 5 }, 
+            transform: 'S-Curve', 
+            rationale: cleanupResponse(`Why 0.6-0.9 adstock range: KOL events create lasting credibility with 4-8+ week influence variability.
+Why 2-5 week lag range: HCPs need varying time to absorb clinical data and change prescribing behavior.
+Watchout: Sporadic events may cause instability - if range shows inconsistent coefficients, consider aggregating with other HCP channels.`)
+        },
+        'HCPEmail': { 
+            adstock: { min: 0.1, max: 0.3 }, 
+            lag: { min: 0, max: 2 }, 
+            transform: 'Log-transform', 
+            rationale: cleanupResponse(`Why 0.1-0.3 adstock range: Email impact decays quickly, testing 1-2 week persistence patterns.
+Why 0-2 week lag range: HCP email checking patterns vary from immediate to periodic review.
+Watchout: Open rates affect exposure - if you have engagement data, consider using opens instead of sends for better parameter stability.`)
+        },
+        'HCPSocial': { 
+            adstock: { min: 0.2, max: 0.4 }, 
+            lag: { min: 0, max: 2 }, 
+            transform: 'Log-transform', 
+            rationale: cleanupResponse(`Why 0.2-0.4 adstock range: Social content persistence varies with shares and professional discussions.
+Why 0-2 week lag range: Content circulation time varies in professional networks.
+Watchout: Engagement quality varies widely. Range helps capture high vs low impact content patterns.`)
+        }
     };
 
     return approvedActivityChannels.map(channel => {
@@ -262,10 +491,12 @@ export const generateDemoFeatures = (approvedActivityChannels: string[]): Featur
         );
         
         const defaults = baseChannel ? channelDefaults[baseChannel] : {
-            adstock: 0.3,
-            lag: 0,
+            adstock: { min: 0.1, max: 0.4 },
+            lag: { min: 0, max: 1 },
             transform: 'Log-transform',
-            rationale: 'Standard MMM parameters with moderate carryover and diminishing returns.'
+            rationale: cleanupResponse(`Why 0.1-0.4 adstock range: Assuming moderate carryover typical of digital channels with 1-3 week persistence testing.
+Why 0-1 week lag range: Default immediate to brief consideration period. Adjust based on business knowledge.
+Watchout: Generic ranges may not capture channel-specific behavior. Monitor model fit and narrow ranges based on coefficient stability.`)
         };
 
         return {
@@ -275,14 +506,62 @@ export const generateDemoFeatures = (approvedActivityChannels: string[]): Featur
     });
 };
 
+// Generate validated active model responses with DTO normalization
+export const generateValidatedActiveModels = async (activityChannels: string[], userSelections?: UserColumnSelection, userContext?: string, featureParams?: FeatureParams[], channelDiagnostics?: ChannelDiagnostic[]): Promise<{ complete: ActiveModelResponse[], incomplete: string[] }> => {
+    const rawModels = generateDemoModels(activityChannels, userSelections, userContext, featureParams, channelDiagnostics);
+    const completeModels: ActiveModelResponse[] = [];
+    const incompleteModelIds: string[] = [];
+    
+    // Convert and validate each model
+    for (const model of rawModels) {
+        try {
+            const { metadata, contributions, diagnostics } = convertModelRunToDTO(model);
+            const validation = validateModelData(model.id, contributions, diagnostics);
+            
+            const activeModel: ActiveModelResponse = {
+                metadata,
+                contributions,
+                diagnostics,
+                is_complete: validation.is_complete,
+                validation_errors: validation.errors.length > 0 ? validation.errors : undefined
+            };
+            
+            if (validation.is_complete) {
+                completeModels.push(activeModel);
+            } else {
+                incompleteModelIds.push(model.id);
+                console.warn(`[DemoSimulation] Model ${model.id} failed validation:`, validation.errors);
+            }
+        } catch (error) {
+            console.error(`[DemoSimulation] Failed to convert model ${model.id}:`, error);
+            incompleteModelIds.push(model.id);
+        }
+    }
+    
+    return { complete: completeModels, incomplete: incompleteModelIds };
+};
+
 // Generate realistic model leaderboard with believable performance metrics (activity channels only)
-export const generateDemoModels = (activityChannels: string[], userSelections?: UserColumnSelection, userContext?: string, featureParams?: FeatureParams[]): ModelRun[] => {
+export const generateDemoModels = (activityChannels: string[], userSelections?: UserColumnSelection, userContext?: string, featureParams?: FeatureParams[], channelDiagnostics?: ChannelDiagnostic[]): ModelRun[] => {
     const models: ModelRun[] = [];
     let modelCounter = 1;
     
     // Extract context from user selections
     const kpiCol = userSelections ? Object.keys(userSelections).find(k => userSelections[k] === ColumnType.DEPENDENT_VARIABLE) : null;
     const geoCol = userSelections ? Object.keys(userSelections).find(k => userSelections[k] === ColumnType.GEO_DIMENSION) : null;
+    
+    // Create a function to get actual spend for a channel from validation diagnostics
+    const getActualSpendForChannel = (channelName: string): number => {
+        if (!channelDiagnostics) return 0;
+        
+        const diagnostic = channelDiagnostics.find(d => d.name === channelName);
+        if (!diagnostic) return 0;
+        
+        const extendedDiagnostic = diagnostic as ChannelDiagnostic & { latest52wSpend?: string };
+        if (!extendedDiagnostic.latest52wSpend) return 0;
+        
+        return parseSpendFromDiagnostic(extendedDiagnostic.latest52wSpend);
+    };
     
     // Algorithm-specific configurations
     const algoConfigs = [
@@ -297,14 +576,14 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
                 
                 // Add user instruction feedback
                 if (featureParams && featureParams.length > 0) {
-                    const highAdstockChannels = featureParams.filter(f => f.adstock > 0.6);
-                    const lowLagChannels = featureParams.filter(f => f.lag === 0);
+                    const highAdstockChannels = featureParams.filter(f => f.adstock.max > 0.6);
+                    const lowLagChannels = featureParams.filter(f => f.lag.min === 0);
                     
                     if (highAdstockChannels.length > 0) {
-                        base += ` ✓ Following your high adstock settings (${highAdstockChannels.map(f => f.channel).join(', ')}) for carryover modeling.`;
+                        base += ` ✓ Following your high adstock ranges (${highAdstockChannels.map(f => f.channel).join(', ')}) for carryover modeling.`;
                     }
                     if (lowLagChannels.length > 0) {
-                        base += ` ✓ Respecting your immediate-impact channels (${lowLagChannels.slice(0,2).map(f => f.channel).join(', ')}).`;
+                        base += ` ✓ Respecting your immediate-impact channel ranges (${lowLagChannels.slice(0,2).map(f => f.channel).join(', ')}).`;
                     }
                 }
                 
@@ -419,19 +698,87 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
                 // Find user's feature settings for this channel
                 const userFeature = featureParams?.find(fp => fp.channel === ch.channel);
                 
+                // Generate specific parameter values from ranges
+                let chosenAdstock: number;
+                let chosenLag: number;
+                
+                if (userFeature) {
+                    // Sample from within the user-specified ranges
+                    const adstockRange = userFeature.adstock.max - userFeature.adstock.min;
+                    chosenAdstock = userFeature.adstock.min + Math.random() * adstockRange;
+                    
+                    const lagRange = userFeature.lag.max - userFeature.lag.min;
+                    chosenLag = Math.round(userFeature.lag.min + Math.random() * lagRange);
+                } else {
+                    // Default fallback values
+                    chosenAdstock = 0.2 + Math.random() * 0.6;
+                    chosenLag = Math.floor(Math.random() * 4);
+                }
+                
                 return {
                     name: ch.channel,
                     included: Math.random() > 0.15, // 85% inclusion rate (some models exclude weak channels)
                     contribution: ch.contribution * 100, // Convert to percentage
                     roi: ch.efficiency,
                     pValue: config.hasPValues ? Math.random() * 0.12 : null, // Only stats models have p-values
-                    // Use user's parameters with small variation to show realistic model differences
-                    adstock: userFeature ? userFeature.adstock + (Math.random() - 0.5) * 0.1 : 0.2 + Math.random() * 0.6,
-                    lag: userFeature ? Math.max(0, userFeature.lag + Math.floor((Math.random() - 0.5) * 2)) : Math.floor(Math.random() * 4),
+                    // Use chosen parameter values within user's specified ranges
+                    adstock: Math.round(chosenAdstock * 100) / 100, // Round to 2 decimals
+                    lag: chosenLag,
                     transform: userFeature ? userFeature.transform : ['Log-transform', 'S-Curve', 'Power', 'Negative Exponential'][Math.floor(Math.random() * 4)] as any
                 };
             });
 
+            // Generate realistic diagnostics
+            const generateDiagnostics = (details: any[], algoName: string, rsq: number, mape: number) => {
+                const channelDiagnostics = details.map(detail => {
+                    const isStatModel = algoName.includes('Regression') || algoName.includes('Bayesian');
+                    const baseCoeff = (Math.random() - 0.5) * 2; // -1 to 1
+                    const stderr = isStatModel ? Math.abs(baseCoeff) * (0.1 + Math.random() * 0.3) : undefined;
+                    const pValue = isStatModel ? Math.random() * 0.2 : null; // 0 to 0.2
+                    
+                    // Expected vs actual sign logic
+                    const expectedSigns = ['TV', 'Display', 'Search', 'Social'].includes(detail.name) ? 'positive' : 'positive';
+                    const actualSign = baseCoeff > 0.1 ? 'positive' : baseCoeff < -0.1 ? 'negative' : 'neutral';
+                    
+                    return {
+                        name: detail.name,
+                        coefficient: isStatModel ? baseCoeff : undefined,
+                        stderr: stderr,
+                        pValue: pValue,
+                        confidence_interval: isStatModel && stderr ? [baseCoeff - 1.96 * stderr, baseCoeff + 1.96 * stderr] as [number, number] : undefined,
+                        expected_sign: expectedSigns,
+                        actual_sign: actualSign,
+                        sign_mismatch: expectedSigns !== actualSign,
+                        importance: !isStatModel ? Math.random() : undefined,
+                        top_driver_rank: !isStatModel ? Math.floor(Math.random() * details.length) + 1 : undefined
+                    };
+                });
+                
+                // Identify issues
+                const weakChannels = channelDiagnostics.filter(d => 
+                    (d.pValue !== null && d.pValue > 0.1) || 
+                    (d.confidence_interval && d.confidence_interval[0] <= 0 && d.confidence_interval[1] >= 0) ||
+                    (d.importance !== undefined && d.importance < 0.1)
+                ).map(d => d.name);
+                
+                const signMismatchChannels = channelDiagnostics.filter(d => d.sign_mismatch).map(d => d.name);
+                const overfitRisk = rsq > 0.9 && mape > 15; // High R² but poor MAPE
+                
+                return {
+                    weak_channels: weakChannels,
+                    sign_mismatch: signMismatchChannels,
+                    overfit_risk: overfitRisk,
+                    warning_count: weakChannels.length + signMismatchChannels.length + (overfitRisk ? 1 : 0),
+                    channel_diagnostics: channelDiagnostics
+                };
+            };
+
+            // Generate provenance hashes
+            const featuresHash = JSON.stringify(activityChannels.sort()).slice(0, 8);
+            const rangesHash = featureParams ? JSON.stringify(featureParams.map(f => ({ channel: f.channel, adstock: f.adstock, lag: f.lag, transform: f.transform })).sort((a, b) => a.channel.localeCompare(b.channel))).slice(0, 8) : 'default';
+            
+            const modelDiagnostics = generateDiagnostics(modelDetails, config.name, rsqVariation, mapeVariation);
+            
             models.push({
                 id: `${config.name.toLowerCase().replace(/\s+/g, '_')}_${variant}`,
                 algo: config.name as 'Bayesian Regression' | 'NN' | 'LightGBM' | 'GLM Regression',
@@ -439,7 +786,20 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
                 mape: mapeVariation,
                 roi: blendedRoi,
                 commentary: config.commentary(rsqVariation, mapeVariation, kpiCol || undefined, featureParams, userContext),
-                details: modelDetails
+                details: modelDetails,
+                channels: [...activityChannels], // Copy of selected channels
+                provenance: {
+                    features_hash: featuresHash,
+                    ranges_hash: rangesHash,
+                    algo: config.name,
+                    data_version: 'demo_v1',
+                    timestamp: Date.now(),
+                    seed: Math.floor(Math.random() * 10000)
+                },
+                diagnostics: modelDiagnostics,
+                isNew: false, // Will be set to true for newly generated models
+                isPinned: false,
+                isStale: false
             } as ModelRun);
             
             modelCounter++;
@@ -491,14 +851,22 @@ export const generateDemoOptimization = (currentSpend: number, activityChannels:
         const projectedROI = baseROI * roiMultiplier;
         const projectedRevenue = totalBudget * projectedROI;
 
+        const channels = activityChannels.map(channelName => ({
+            name: channelName,
+            currentSpend: allocations[channelName] || 0,
+            recommendedSpend: allocations[channelName] || 0,
+            change: 0,
+            projectedROI: projectedROI,
+            agentCommentary: `Optimized allocation for ${channelName}`
+        }));
+
         return {
             id: `scenario_${index}`,
-            ...scenario,
-            totalBudget,
+            title: scenario.name,
+            recommendedSpend: totalBudget,
             projectedROI,
-            projectedRevenue,
-            channelAllocations: allocations,
-            isRecommended: scenario.name.includes('Efficiency') // Mark efficiency scenario as recommended
-        } as OptimizerScenario;
+            netRevenue: projectedRevenue,
+            channels
+        };
     });
 };

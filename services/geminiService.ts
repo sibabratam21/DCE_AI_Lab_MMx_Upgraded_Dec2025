@@ -3,6 +3,24 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AppStep, ColumnType, EdaResult, UserColumnSelection, FeatureParams, ModelRun, EdaInsights, ParsedData, ChannelDiagnostic, TrendDataPoint, ColumnSummaryItem, ModelingInteractionResponse, CalibrationInteractionResponse, ModelDetail, OptimizerInteractionResponse, OptimizerScenario } from '../types';
 
+// Helper function to clean up AI responses with markdown formatting
+const cleanupResponse = (text: string): string => {
+  return text
+    // Remove all markdown formatting for better readability
+    .replace(/\*\*(.+?)\*\*/g, '$1') // Remove bold formatting
+    .replace(/\*(.+?)\*/g, '$1') // Remove italic formatting
+    .replace(/###\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/##\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/#\s*(.+)/g, '$1') // Remove header formatting
+    .replace(/•\s*/g, '') // Remove bullet points
+    .replace(/\*\s*/g, '') // Remove asterisk bullet points
+    .replace(/^\s*-\s*/gm, '') // Remove dash bullet points
+    .replace(/^\s*\d+\.\s*/gm, '') // Remove numbered lists
+    // Clean up extra whitespace
+    .replace(/\n{3,}/g, '\n\n') // Reduce multiple line breaks
+    .trim();
+};
+
 if (!process.env.API_KEY) {
     throw new Error("API_KEY environment variable not set");
 }
@@ -40,6 +58,7 @@ export const analyzeColumns = async (csvText: string): Promise<EdaResult[]> => {
   const sample = getCsvSample(csvText);
   const prompt = `You are a data analyst specializing in Marketing Mix Modeling. I will provide a CSV sample. Your task is to analyze the columns and classify each one into one of the following roles: '${Object.values(ColumnType).join(', ')}'.
 
+Column Types:
 - Dependent Variable: The target metric to be predicted (e.g., sales, prescriptions). Should be numeric.
 - Time Dimension: The date or week column, which defines the time grain of the model.
 - Geo Dimension: The geographical area column, if present. Often an ID.
@@ -52,7 +71,9 @@ CSV Sample:
 \`\`\`csv
 ${sample}
 \`\`\`
+
 Base your analysis on column names and the data. For example, a column named 'TRx' with numeric values is likely the Dependent Variable. 'Week' is the Time Dimension. 'TV_Spend' is Marketing Spend. 'TV_Impressions' is Marketing Activity. 'Seasonality' is a Control Variable.
+
 Return the result as a JSON array matching the provided schema. Be logical and accurate.
 `;
 
@@ -156,23 +177,23 @@ export const getFeatureEngineeringSummary = async (features: FeatureParams[], se
         contextNote = `\n\n*Based on your input: "${userContext}" - these parameters have been tailored to align with your specific business context and requirements.*`;
     }
     
-    return `**Overall Strategy**
+    return cleanupResponse(`Overall Strategy
 
 ${strategyText}${contextNote}
 
-**Key Highlights**
+Key Highlights
 
-• **Strategic Channel Differentiation**: ${highAdstockChannels.length > 0 ? `Brand-building channels like ${highAdstockChannels.map(f => f.channel).join(', ')} use high adstock (${highAdstockChannels.map(f => f.adstock.toFixed(1)).join(', ')}) for long-term effects` : 'Channels focus on immediate impact'}, ${lowAdstockChannels.length > 0 ? `while direct-response channels like ${lowAdstockChannels.map(f => f.channel).join(', ')} use minimal adstock for immediate impact modeling` : 'with balanced carryover effects'}.
+Strategic Channel Differentiation: ${highAdstockChannels.length > 0 ? `Brand-building channels like ${highAdstockChannels.map(f => f.channel).join(', ')} use high adstock (${highAdstockChannels.map(f => f.adstock.toFixed(1)).join(', ')}) for long-term effects` : 'Channels focus on immediate impact'}, ${lowAdstockChannels.length > 0 ? `while direct-response channels like ${lowAdstockChannels.map(f => f.channel).join(', ')} use minimal adstock for immediate impact modeling` : 'with balanced carryover effects'}.
 
-• **Professional Decision Cycles**: ${highLagChannels.length > 0 ? `Healthcare-focused channels like ${highLagChannels.map(f => f.channel).join(', ')} incorporate ${highLagChannels.map(f => f.lag).join('-')}-week lags to reflect realistic professional decision-making timeframes.` : 'Most channels show immediate impact with minimal lag, indicating direct-response focus.'}
+Professional Decision Cycles: ${highLagChannels.length > 0 ? `Healthcare-focused channels like ${highLagChannels.map(f => f.channel).join(', ')} incorporate ${highLagChannels.map(f => f.lag).join('-')}-week lags to reflect realistic professional decision-making timeframes.` : 'Most channels show immediate impact with minimal lag, indicating direct-response focus.'}
 
-• **Saturation Modeling**: ${sCurveChannels.length > 0 ? `S-Curve transforms on ${sCurveChannels.map(f => f.channel).join(', ')} capture the realistic ramp-up and saturation patterns of relationship-driven marketing.` : 'Log-transform and Power curves capture diminishing returns patterns for performance channels.'}
+Saturation Modeling: ${sCurveChannels.length > 0 ? `S-Curve transforms on ${sCurveChannels.map(f => f.channel).join(', ')} capture the realistic ramp-up and saturation patterns of relationship-driven marketing.` : 'Log-transform and Power curves capture diminishing returns patterns for performance channels.'}
 
-**Expert Considerations**
+Expert Considerations
 
-• **Industry Best Practices**: The parameter choices align with MMM standards - search channels show low carryover, brand channels maintain longer effects, and HCP touchpoints reflect healthcare decision cycles.
+Industry Best Practices: The parameter choices align with MMM standards - search channels show low carryover, brand channels maintain longer effects, and HCP touchpoints reflect healthcare decision cycles.
 
-• **Model Robustness**: This setup balances statistical rigor with business reality, ensuring the model can distinguish between immediate performance drivers and long-term brand builders for actionable insights.`;
+Model Robustness: This setup balances statistical rigor with business reality, ensuring the model can distinguish between immediate performance drivers and long-term brand builders for actionable insights.`);
 };
 
 const leaderboardSchema = {
@@ -208,10 +229,10 @@ const leaderboardSchema = {
     }
 };
 
-export const generateModelLeaderboard = async (selections: UserColumnSelection, features: FeatureParams[], userInput: string, data: ParsedData[]): Promise<ModelRun[]> => {
+export const generateModelLeaderboard = async (selections: UserColumnSelection, features: FeatureParams[], userInput: string, data: ParsedData[], channelDiagnostics?: ChannelDiagnostic[]): Promise<ModelRun[]> => {
     // Use fast demo simulation instead of AI processing, now honoring user's feature parameters
     const channels = features.map(f => f.channel);
-    return generateDemoModels(channels, selections, userInput, features);
+    return generateDemoModels(channels, selections, userInput, features, channelDiagnostics);
 /*
     const prompt = `
 You are a data science platform simulating an automated model building process for MMM.
@@ -277,26 +298,26 @@ const getDataSampleAsCsv = (data: ParsedData[], rowCount = 50): string => {
 export const getGeneralChatResponse = async (query: string, currentStep: AppStep, context: any, data: ParsedData[]): Promise<string> => {
     const dataSample = getDataSampleAsCsv(data, 20); 
 
-    const prompt = `You are a data analyst AI assistant. Your primary function is to analyze the provided data sample and answer the user's question based *only* on that data.
+    const prompt = `You are a data analyst AI assistant. Your primary function is to analyze the provided data sample and answer the user's question based only on that data.
 
-**Core Task:**
-Analyze the data provided in the "Data Sample" section and use it to answer the "User's Question". All calculations (totals, averages, trends, etc.) MUST be derived directly from this data. Do not use external knowledge or refuse to answer because the data is a sample. If the provided sample is insufficient for a precise answer, provide an estimate based on the available data and explicitly state that it is an estimate based on a sample of the full dataset.
+Core Task:
+Analyze the data provided in the Data Sample section and use it to answer the User's Question. All calculations (totals, averages, trends, etc.) MUST be derived directly from this data. Do not use external knowledge or refuse to answer because the data is a sample. If the provided sample is insufficient for a precise answer, provide an estimate based on the available data and explicitly state that it is an estimate based on a sample of the full dataset.
 
-**Data Sample (up to the first 20 rows of user's data):**
+Data Sample (up to the first 20 rows of user's data):
 \`\`\`csv
 ${dataSample}
 \`\`\`
 
-**Context (for your reference):**
-- **Current App Step:** ${AppStep[currentStep]}
+Context (for your reference):
+- Current App Step: ${AppStep[currentStep]}
 
-**User's Question:** "${query}"
+User's Question: "${query}"
 
-**Response Guidelines:**
-- Your response must be in Markdown.
-- Use tables for structured data.
-- Be concise and directly address the user's question with information from the data.
-- Do not suggest UI actions or talk about the app's functionality. Focus on the data.
+Response Guidelines:
+- Write a clean, readable response WITHOUT markdown formatting (no bold, bullets, headers, etc.)
+- Use simple tables with plain text formatting if needed
+- Be concise and directly address the user's question with information from the data
+- Do not suggest UI actions or talk about the app's functionality. Focus on the data
 `;
 
     const response = await ai.models.generateContent({
@@ -304,7 +325,7 @@ ${dataSample}
         contents: prompt
     });
 
-    return response.text;
+    return cleanupResponse(response.text);
 }
 
 export const getFeatureConfirmationSummary = async (features: FeatureParams[], selections: UserColumnSelection): Promise<string> => {
@@ -348,39 +369,39 @@ export const getModelingInteraction = async (query: string, models: ModelRun[]):
 You are an AI assistant for a Marketing Mix Modeling platform. The user is viewing a leaderboard of models and has sent a query.
 Your task is to interpret the user's query and respond appropriately in JSON format by querying the provided model data.
 
-**Current Model Leaderboard (with details):**
+Current Model Leaderboard (with details):
 \`\`\`json
 ${JSON.stringify(models, null, 2)}
 \`\`\`
 
-**User Query:** "${query}"
+User Query: "${query}"
 
-**Your Tasks:**
+Your Tasks:
 
-1.  **Analyze the Query:** Understand the user's intent.
-2.  **Formulate a Text Response:** Write a helpful, conversational response.
-3.  **Determine Actions and populate the JSON response:**
+1. Analyze the Query: Understand the user's intent.
+2. Formulate a Text Response: Write a helpful, conversational response in plain text WITHOUT markdown formatting (no bold, headers, bullets, etc.). Keep it concise and readable.
+3. Determine Actions and populate the JSON response:
 
-    *   **If the user asks a question about a specific model or channel (e.g., "what is the TV impact in br_2?", "compare roi for samples in nn_1 and lgbm_1"):**
-        *   **CRITICAL: Find the answer in the JSON data provided.** Look up the model by its 'id', find the channel in its 'details' array, and extract the requested metric ('contribution', 'roi', 'pValue', etc.).
-        *   Formulate the answer in the 'text' field.
-        *   **Do not** populate 'newModel' or 'selectModelId'.
+   If the user asks a question about a specific model or channel (e.g., "what is the TV impact in br_2?", "compare roi for samples in nn_1 and lgbm_1"):
+      CRITICAL: Find the answer in the JSON data provided. Look up the model by its 'id', find the channel in its 'details' array, and extract the requested metric ('contribution', 'roi', 'pValue', etc.).
+      Formulate the answer in the 'text' field.
+      Do not populate 'newModel' or 'selectModelId'.
 
-    *   **If the user asks to "rerun" a model or create a new one (e.g., "rerun with stricter outliering"):**
-        *   Generate a **single new model object** for the 'newModel' field that is consistent with the schema.
-        *   Create a new, unique ID (e.g., if 'br_3' exists, create 'br_4').
-        *   Slightly adjust metrics and details to plausibly reflect their request.
-        *   Your text response should announce the new model.
+   If the user asks to "rerun" a model or create a new one (e.g., "rerun with stricter outliering"):
+      Generate a single new model object for the 'newModel' field that is consistent with the schema.
+      Create a new, unique ID (e.g., if 'br_3' exists, create 'br_4').
+      Slightly adjust metrics and details to plausibly reflect their request.
+      Your text response should announce the new model.
 
-    *   **If the user asks to proceed with, select, activate, or examine a specific model (e.g., "let's go with br_2", "activate nn_1"):**
-        *   Identify the correct model ID from the leaderboard.
-        *   Put this ID in the 'selectModelId' field.
-        *   Your text response should confirm their selection.
+   If the user asks to proceed with, select, activate, or examine a specific model (e.g., "let's go with br_2", "activate nn_1"):
+      Identify the correct model ID from the leaderboard.
+      Put this ID in the 'selectModelId' field.
+      Your text response should confirm their selection.
 
-    *   **For any other general question:**
-        *   Provide a helpful answer in the 'text' field.
+   For any other general question:
+      Provide a helpful answer in the 'text' field.
 
-**Output Format:**
+Output Format:
 Return a single JSON object matching the provided schema. Only include 'newModel' or 'selectModelId' if the user's query explicitly triggers those actions.
 `;
 
@@ -420,26 +441,26 @@ export const getCalibrationInteraction = async (query: string, currentModel: Mod
 You are an AI assistant for an MMM platform. The user wants to tune the provided model via a natural language command.
 Your task is to interpret the command, apply it to the model JSON, and return the complete updated model object.
 
-**Current Model State:**
+Current Model State:
 \`\`\`json
 ${JSON.stringify(currentModel, null, 2)}
 \`\`\`
 
-**User's Command:** "${query}"
+User's Command: "${query}"
 
-**Instructions:**
-1.  **Interpret Command:** Understand if the user is changing adstock, lag, or including/excluding a channel.
-2.  **Update 'details' Array:** Modify the 'details' array to reflect the command.
-    *   If changing a value (e.g., "set TV adstock to 0.7"), update the 'adstock' field for the 'TV' channel.
-    *   If excluding a channel, set its 'included' property to \`false\`.
-3.  **Recalculate Metrics (Crucial):** After updating, you MUST adjust other values plausibly.
-    *   **Contributions:** When a channel is excluded/included, you MUST recalculate the 'contribution' for ALL channels. The total contribution of all *included* channels should be roughly the same as the original total.
-    *   **Top-Level Metrics (\`rsq\`, \`mape\`, \`roi\`):** The model's overall performance will change.
-        *   If a channel is **excluded**, the model gets "weaker". Slightly **decrease \`rsq\`** (e.g., by 0.01-0.03) and slightly **increase \`mape\`** (e.g., by 0.2-0.5). Adjust blended 'roi' down a bit.
-        *   If a channel is **included**, do the reverse.
-        *   If tuning a parameter like adstock, metric changes should be very small.
-4.  **Formulate Text Response:** Write a short response confirming the action (e.g., "Okay, I've excluded 'Samples' and updated the model.").
-5.  **Return Full Object:** Return a single JSON object containing your 'text' response and the **complete, updated 'updatedModel' object**.
+Instructions:
+1. Interpret Command: Understand if the user is changing adstock, lag, or including/excluding a channel.
+2. Update 'details' Array: Modify the 'details' array to reflect the command.
+   If changing a value (e.g., "set TV adstock to 0.7"), update the 'adstock' field for the 'TV' channel.
+   If excluding a channel, set its 'included' property to false.
+3. Recalculate Metrics (Crucial): After updating, you MUST adjust other values plausibly.
+   Contributions: When a channel is excluded/included, you MUST recalculate the 'contribution' for ALL channels. The total contribution of all included channels should be roughly the same as the original total.
+   Top-Level Metrics (rsq, mape, roi): The model's overall performance will change.
+      If a channel is excluded, the model gets "weaker". Slightly decrease rsq (e.g., by 0.01-0.03) and slightly increase mape (e.g., by 0.2-0.5). Adjust blended 'roi' down a bit.
+      If a channel is included, do the reverse.
+      If tuning a parameter like adstock, metric changes should be very small.
+4. Formulate Text Response: Write a short response confirming the action in plain text without markdown formatting (e.g., "Excluded Samples and updated the model.").
+5. Return Full Object: Return a single JSON object containing your 'text' response and the complete, updated 'updatedModel' object.
 
 This is a simulation. Make logical, plausible changes.
 `;
@@ -547,39 +568,66 @@ const optimizerInteractionSchema = {
 
 export const getOptimizerInteraction = async (query: string, model: ModelRun, existingScenarios: OptimizerScenario[]): Promise<OptimizerInteractionResponse> => {
     const prompt = `
-You are an AI budget optimization specialist for a Marketing Mix Modeling (MMM) platform.
-Your task is to create a new, custom budget scenario based on the user's request, the finalized MMM model, and existing scenarios for context.
+You are an AI budget optimization specialist for a Marketing Mix Modeling (MMM) platform. Create data-driven budget scenarios that address strategic marketing objectives.
 
-**Finalized MMM Model (Source of Truth for ROI, etc.):**
+**CONTEXT & DATA FOUNDATION**
+Current MMM Model Performance:
 \`\`\`json
 ${JSON.stringify(model, null, 2)}
 \`\`\`
 
-**Existing Scenarios (For context on what user has already seen):**
+Existing Portfolio Scenarios:
 \`\`\`json
 ${JSON.stringify(existingScenarios.slice(0, 3), null, 2)}
 \`\`\`
 
-**User's Request:** "${query}"
+**USER REQUEST ANALYSIS**
+Query: "${query}"
 
-**Instructions:**
-1.  **Interpret the Request:** Analyze the user's query to understand their constraints and goals (e.g., new total budget, maximizing ROI, protecting spend on a channel).
-2.  **Generate a New Scenario:** Create one single, new scenario object.
-    *   **ID and Title:** Give it a new, unique ID (e.g., "custom_budget_1"). Give it a descriptive title like "Custom $250M Budget" or "TV Spend Locked at 35M". **Do not** start the title with "Scenario X:". The app will handle numbering.
-    *   **Adhere to Constraints:** The 'recommendedSpend' for all channels MUST sum up to the user's requested budget. If no budget is given, make a reasonable adjustment based on their goal.
-    *   **Re-allocate Budget:** Plausibly re-allocate spend across channels based on their original ROI from the model. Increase spend on high-ROI channels and decrease on low-ROI channels to meet the user's goal.
-    *   **Calculate New Metrics:**
-        *   \`recommendedSpend\`: The new total spend (sum of channel spends).
-        *   \`projectedROI\`: A plausible new blended ROI. If the budget is lower or focused on efficiency, this might increase. If focused on volume, it might decrease.
-        *   \`netRevenue\`: Calculated as \`recommendedSpend * (projectedROI - 1)\`.
-    *   **Channel-level Details:**
-        *   \`currentSpend\`: This is a simulated value. Use a plausible number based on the channel's adstock/lag from the model (e.g., \`adstock * 500 + lag * 100\`). Keep this consistent for the same channel across scenarios.
-        *   \`recommendedSpend\`: Your new proposed spend for this channel.
-        *   \`change\`: The percentage change from current to recommended spend.
-        *   \`projectedROI\`: The new estimated ROI for the channel under this plan.
-        *   \`agentCommentary\`: A short, insightful justification for the change.
-3.  **Formulate a Text Response:** Write a conversational response that introduces the new scenario and briefly explains how it meets their request.
-4.  **Return JSON:** Respond with a single JSON object containing the 'text' and the 'newScenario' object, matching the provided schema.
+**OBJECTIVE**
+Create a data-driven budget allocation scenario that addresses the user's request while leveraging MMM insights for optimal performance.
+
+**OPTIMIZATION INTELLIGENCE GUIDELINES**
+
+1. **Strategic Interpretation**
+   - Decode business intent: Are they optimizing for efficiency (ROI), scale (volume), or balanced growth?
+   - Identify constraints: Fixed budgets, channel minimums, competitive pressures
+   - Recognize market dynamics: Seasonality, saturation points, diminishing returns
+
+2. **Advanced Allocation Logic**
+   - **High ROI Channels**: Increase allocation up to saturation curve inflection points
+   - **Volume Drivers**: Scale spend on high-contribution channels for growth objectives  
+   - **Portfolio Balance**: Maintain diversification to reduce risk and capture full-funnel effects
+   - **Marginal ROI Optimization**: Reallocate budget where marginal returns are highest
+   - **Cross-Channel Effects**: Account for halo effects and channel synergies
+
+3. **Market-Ready Scenario Creation**
+   - **ID**: Generate professional naming (e.g., "efficiency_max_2024", "scale_growth_q4")
+   - **Title**: Business-focused names like "Q4 Efficiency Focus", "Growth Acceleration Plan", "Balanced Performance Strategy"
+   - **Budget Math**: Ensure all channel spends sum exactly to target budget
+   - **ROI Projections**: Use diminishing returns curves - higher budgets typically show slight ROI compression
+   - **Change Rationale**: Provide strategic reasoning, not just mathematical optimization
+
+4. **Channel-Level Strategic Insights**
+   - **Current Spend**: Use model contribution as base (channel ROI × baseline factor)
+   - **Recommended Spend**: Apply strategic reallocation based on efficiency curves
+   - **Change %**: Calculate precise percentage shifts with business context
+   - **Channel ROI**: Project new ROI considering saturation and competitive factors  
+   - **Strategic Commentary**: Explain the "why" behind each allocation decision
+
+5. **Response Communication**
+   Write a clear business explanation that:
+   - Explains the optimization approach
+   - Quantifies the expected business impact
+   - Describes key allocation changes with rationale
+   - Uses professional marketing terminology
+
+**RESPONSE FORMAT**
+Provide clear business communication without markdown, followed by precise JSON schema compliance.
+
+**EXAMPLE LANGUAGE**
+- "Reallocated investment toward high-performing channels to improve overall portfolio efficiency"
+- "This strategy optimizes budget allocation for improved ROI while maintaining scale objectives"
 `;
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -610,21 +658,21 @@ export const rerunModel = async (originalModel: ModelRun): Promise<ModelRun> => 
 You are a data science platform simulating a model recalibration. A user has updated parameters for an existing model.
 Based on these new parameters, generate a SINGLE new model run object.
 
-**Original Model State (for context):**
+Original Model State (for context):
 \`\`\`json
 ${JSON.stringify({ id: originalModel.id, algo: originalModel.algo, rsq: originalModel.rsq, mape: originalModel.mape, roi: originalModel.roi }, null, 2)}
 \`\`\`
 
-**User's Updated Model Parameters (this is the new target state):**
+User's Updated Model Parameters (this is the new target state):
 \`\`\`json
 ${JSON.stringify(originalModel, null, 2)}
 \`\`\`
 
-**Task:**
-1.  **Generate a new unique ID.** Append a suffix to the original ID. For example, if the original ID is "glm_1", the new ID should be "glm_1_cal_1". If it's already a calibrated model like "glm_1_cal_1", make it "glm_1_cal_2".
-2.  **Plausibly adjust metrics.** Based on the changes in the 'details' array (e.g., a channel was excluded, adstock changed), make small, logical adjustments to the top-level metrics (\`rsq\`, \`mape\`, \`roi\`). For example, excluding a channel with a p-value > 0.1 might slightly IMPROVE the model, while excluding one with p < 0.05 will likely WORSEN it (lower rsq, higher mape). Changing adstock should cause minor fluctuations. When a channel is excluded, its contribution must be redistributed among other channels. The total contribution should remain similar. The blended ROI should also be recalculated.
-3.  **Write a new commentary.** The commentary should briefly mention what was changed from the original model (e.g., "Recalibrated from ${originalModel.id} by excluding 'Samples' channel.").
-4.  **Return the complete new model object.** The 'details' array in your response should be identical to the one in the "User's Updated Model Parameters" input. The overall object must match the schema.
+Task:
+1. Generate a new unique ID. Append a suffix to the original ID. For example, if the original ID is "glm_1", the new ID should be "glm_1_cal_1". If it's already a calibrated model like "glm_1_cal_1", make it "glm_1_cal_2".
+2. Plausibly adjust metrics. Based on the changes in the 'details' array (e.g., a channel was excluded, adstock changed), make small, logical adjustments to the top-level metrics (rsq, mape, roi). For example, excluding a channel with a p-value > 0.1 might slightly IMPROVE the model, while excluding one with p < 0.05 will likely WORSEN it (lower rsq, higher mape). Changing adstock should cause minor fluctuations. When a channel is excluded, its contribution must be redistributed among other channels. The total contribution should remain similar. The blended ROI should also be recalculated.
+3. Write a new commentary. The commentary should briefly mention what was changed from the original model (e.g., "Recalibrated from ${originalModel.id} by excluding 'Samples' channel.").
+4. Return the complete new model object. The 'details' array in your response should be identical to the one in the "User's Updated Model Parameters" input. The overall object must match the schema.
 
 Return a single JSON object matching the provided schema. Ensure every field is populated correctly.
 `;

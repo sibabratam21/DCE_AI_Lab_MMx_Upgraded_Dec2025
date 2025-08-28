@@ -1,5 +1,5 @@
 import { ModelRun, OptimizerScenario, OptimizerScenarioChannel } from '../types';
-import { calculateRealisticSpend } from './demoSimulation';
+import { getConsistentChannelSpend } from './demoSimulation';
 
 const getAgentCommentary = (channelName: string, scenarioKey: string): string => {
     const commentaries: Record<string, Record<string, string>> = {
@@ -20,9 +20,9 @@ const getAgentCommentary = (channelName: string, scenarioKey: string): string =>
         }
     };
     const keyMap: { [key: string]: string } = {
-        'Scenario 1: Maximize ROI': 'maximizeROI',
-        'Scenario 2: Maximize Contribution': 'maximizeContrib',
-        'Scenario 3: Balanced Approach': 'balanced'
+        'Efficiency-First Strategy': 'maximizeROI',
+        'Growth Acceleration Plan': 'maximizeContrib',
+        'Balanced Portfolio Strategy': 'balanced'
     };
     const internalKey = keyMap[scenarioKey] || 'balanced';
     return commentaries[internalKey][channelName] || commentaries[internalKey]['Default'];
@@ -41,17 +41,16 @@ const generateScenario = (
     const channels: OptimizerScenarioChannel[] = model.details
         .filter(p => p.included)
         .map(p => {
-            // Use consistent spend calculation based on channel type and activity simulation
-            const simulatedActivity = p.adstock * 10000 + p.lag * 2000 + 5000; // Simulated activity level
-            const currentSpend = calculateRealisticSpend(p.name, simulatedActivity, 52) / 1000000; // Convert to M for display
+            // Use consistent spend calculation that matches validation tab
+            const currentSpend = getConsistentChannelSpend(p.name) / 1000000; // Convert to M for display
             const spendMultiplier = spendMultiplierProfile(p.roi);
             const recommendedSpend = currentSpend * spendMultiplier;
             const change = recommendedSpend === 0 && currentSpend === 0 ? 0 : ((recommendedSpend - currentSpend) / currentSpend) * 100;
 
             return {
                 name: p.name,
-                currentSpend: currentSpend / 10, // Convert to M
-                recommendedSpend: recommendedSpend / 10, // Convert to M
+                currentSpend: currentSpend, // Already in millions from /1000000 above
+                recommendedSpend: recommendedSpend, // Already in millions 
                 change,
                 projectedROI: p.roi * (1 + roiAdjustment + (spendMultiplier - 1) * 0.1),
                 agentCommentary: getAgentCommentary(p.name, title)
@@ -77,31 +76,31 @@ const generateScenario = (
 export const generateInitialScenarios = (model: ModelRun): OptimizerScenario[] => {
     const scenarios: OptimizerScenario[] = [];
 
-    // Scenario 1: Maximize ROI
+    // Scenario 1: Efficiency-First Strategy
     scenarios.push(generateScenario(
         model,
-        'maximizeROI',
-        'Scenario 1: Maximize ROI',
+        'efficiency_focus',
+        'Efficiency-First Strategy',
         (roi) => (roi > model.roi * 1.1 ? 1.5 : roi < model.roi * 0.9 ? 0.5 : 0.8),
         0.9,
         0.15
     ));
 
-    // Scenario 2: Maximize Contribution
+    // Scenario 2: Growth Acceleration Plan
     scenarios.push(generateScenario(
         model,
-        'maximizeContrib',
-        'Scenario 2: Maximize Contribution',
+        'growth_acceleration',
+        'Growth Acceleration Plan',
         (roi) => (roi > model.roi * 0.5 ? 1.5 : 1.1),
         1.2,
         -0.1
     ));
     
-    // Scenario 3: Balanced Approach
+    // Scenario 3: Balanced Portfolio Strategy
     scenarios.push(generateScenario(
         model,
-        'balanced',
-        'Scenario 3: Balanced Approach',
+        'balanced_portfolio',
+        'Balanced Portfolio Strategy',
         (roi) => (roi > model.roi * 1.1 ? 1.25 : roi < model.roi * 0.9 ? 0.75 : 1.0),
         1.05,
         0.05

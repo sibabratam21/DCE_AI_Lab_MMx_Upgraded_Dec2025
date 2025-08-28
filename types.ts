@@ -1,6 +1,7 @@
 
 export enum AppStep {
   Welcome,
+  Configure,
   DataValidation,
   FeatureEngineering,
   Modeling,
@@ -27,6 +28,8 @@ export interface UserColumnSelection {
   [columnName: string]: ColumnType;
 }
 
+import { DatasetProvenance } from './utils/datasetHash';
+
 export interface ChannelDiagnostic {
     name: string;
     sparsity: string; // e.g., "5% zeros"
@@ -39,6 +42,7 @@ export interface ChannelDiagnostic {
 export interface TrendDataPoint {
   date: string;
   kpi: number;
+  [channelKey: string]: number | string; // Allow channel activity data
 }
 
 export interface CorrelationDataPoint {
@@ -60,14 +64,26 @@ export interface EdaInsights {
   correlationSummary?: string;
   interactionsWarning?: string;
   correlationData?: CorrelationResult[];
+  provenance?: DatasetProvenance;
+}
+
+export interface ParameterRange {
+  min: number;
+  max: number;
 }
 
 export interface FeatureParams {
   channel: string;
-  adstock: number;
-  lag: number;
+  adstock: ParameterRange;
+  lag: ParameterRange;
   transform: 'Log-transform' | 'Negative Exponential' | 'S-Curve' | 'Power';
   rationale: string;
+}
+
+export interface FeatureEngineering {
+  selectedChannels: string[];
+  paramRanges: FeatureParams[];
+  provenance?: DatasetProvenance;
 }
 
 // Unified model detail, combining parameters and results
@@ -82,6 +98,40 @@ export interface ModelDetail {
     transform: 'Log-transform' | 'Negative Exponential' | 'S-Curve' | 'Power';
 }
 
+export interface ModelProvenance {
+  features_hash: string;
+  ranges_hash: string;
+  algo: string;
+  data_version: string;
+  timestamp: number;
+  seed?: number;
+  // Baseline-aware training fields
+  baseline_model_id?: string;
+  baseline_diff?: Record<string, string[]>; // channel -> [changed_params]
+  exploration_method?: string;
+}
+
+export interface ChannelDiagnostic {
+  name: string;
+  coefficient?: number;
+  stderr?: number;
+  pValue?: number | null;
+  confidence_interval?: [number, number];
+  expected_sign: 'positive' | 'negative' | 'neutral';
+  actual_sign: 'positive' | 'negative' | 'neutral';
+  sign_mismatch: boolean;
+  importance?: number; // For tree/NN models (0-1)
+  top_driver_rank?: number;
+}
+
+export interface ModelDiagnostics {
+  weak_channels: string[]; // channels with p>0.10, CI crosses 0, or low importance
+  sign_mismatch: string[]; // channels with unexpected signs
+  overfit_risk: boolean; // high train R² with poor holdout MAPE
+  warning_count: number;
+  channel_diagnostics: ChannelDiagnostic[];
+}
+
 export interface ModelRun {
   id: string;
   algo: 'Bayesian Regression' | 'NN' | 'LightGBM' | 'GLM Regression';
@@ -90,6 +140,12 @@ export interface ModelRun {
   roi: number; // Blended ROI
   commentary: string;
   details: ModelDetail[];
+  channels: string[];
+  provenance: ModelProvenance & DatasetProvenance;
+  diagnostics: ModelDiagnostics;
+  isNew?: boolean;
+  isPinned?: boolean;
+  isStale?: boolean;
 }
 
 export interface ResultSummary {
@@ -107,18 +163,32 @@ export interface ReportChannelResult {
     mROI: number;
 }
 
+export interface ReportAttribution {
+    channels: ReportChannelResult[];
+    totalSpend: number;
+    totalKPI: number;
+    curves?: any;
+    provenance?: DatasetProvenance;
+}
+
 export interface ChatAction {
   text: string;
-  onClick: () => void;
+  onClick?: () => void;
   style?: 'primary' | 'secondary';
   disabled?: boolean;
 }
 
+import { ReactNode } from 'react';
+
 export interface AgentMessage {
   id: number;
   sender: 'ai' | 'user';
-  text: string | React.ReactNode;
+  text: string | ReactNode;
   actions?: ChatAction[];
+  meta?: {
+    kind?: 'suggestion' | 'insight' | 'validate_suggestions';
+    suggestion?: boolean;
+  };
 }
 
 export type ParsedData = Record<string, string | number>;
@@ -155,6 +225,7 @@ export interface OptimizerScenario {
     projectedROI: number;
     netRevenue: number;
     channels: OptimizerScenarioChannel[];
+    provenance?: DatasetProvenance;
 }
 
 export interface OptimizerInteractionResponse {

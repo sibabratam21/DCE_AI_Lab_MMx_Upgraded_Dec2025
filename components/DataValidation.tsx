@@ -1,17 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { EdaResult, UserColumnSelection, ColumnType, ChannelDiagnostic, EdaInsights, ParsedData } from '../types';
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, BarChart, Bar, Cell } from 'recharts';
+import { EdaResult, UserColumnSelection, ColumnType, ChannelDiagnostic, EdaInsights, ParsedData, TrendDataPoint } from '../types';
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid, BarChart, Bar, Cell, Area, AreaChart, ComposedChart, ReferenceLine } from 'recharts';
 import { Loader } from './Loader';
+import { movingAverage, createDatasetHash } from '../utils/smooth';
 
 interface DataValidationProps {
-    edaResults: EdaResult[];
     selections: UserColumnSelection;
-    onSelectionsChange: (selections: UserColumnSelection) => void;
     insights: EdaInsights | null;
     diagnostics: ChannelDiagnostic[];
     onDiagnosticsChange: (diagnostics: ChannelDiagnostic[]) => void;
     isLoadingInsights: boolean;
     parsedData: ParsedData[];
+    onProceed?: () => void;
 }
 
 const chartColors = {
@@ -50,14 +50,13 @@ const getCorrelationColor = (value: number) => {
 
 
 export const DataValidation: React.FC<DataValidationProps> = ({ 
-    edaResults, 
-    selections, 
-    onSelectionsChange,
+    selections,
     insights, 
     diagnostics, 
     onDiagnosticsChange, 
     isLoadingInsights,
-    parsedData
+    parsedData,
+    onProceed
 }) => {
     
     const [activeTab, setActiveTab] = useState<'diagnostics' | 'correlation' | 'sparsity'>('diagnostics');
@@ -65,6 +64,32 @@ export const DataValidation: React.FC<DataValidationProps> = ({
     const [sparsityData, setSparsityData] = useState<Array<{ name: string; sparsity: number }> | null>(null);
     const [isLoadingCorrelation, setIsLoadingCorrelation] = useState(false);
     const [isLoadingSparsity, setIsLoadingSparsity] = useState(false);
+    const [smoothingMode, setSmoothingMode] = useState<'raw' | 'smoothed'>('smoothed');
+    
+    // Memoized smoothed data with caching
+    const { rawTrendData, smoothedTrendData, datasetHash } = useMemo(() => {
+        const rawData = insights?.trendData || [];
+        const hash = createDatasetHash(rawData);
+        
+        if (rawData.length === 0) {
+            return { rawTrendData: [], smoothedTrendData: [], datasetHash: hash };
+        }
+        
+        // Extract KPI values, smooth them, then reconstruct data points
+        const kpiValues = rawData.map(point => point.kpi);
+        const smoothedKpis = movingAverage(kpiValues, 4);
+        
+        const smoothedData = rawData.map((point, index) => ({
+            ...point,
+            kpi: smoothedKpis[index]
+        }));
+        
+        return {
+            rawTrendData: rawData,
+            smoothedTrendData: smoothedData,
+            datasetHash: hash
+        };
+    }, [insights?.trendData]);
 
     const handleToggleAction = (index: number, isApproved: boolean) => {
         const newDiagnostics = diagnostics.map((diag, i) => i === index ? { ...diag, isApproved } : diag);
@@ -133,29 +158,163 @@ export const DataValidation: React.FC<DataValidationProps> = ({
             case 'diagnostics':
                 return (
                     <>
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            <div className="lg:col-span-2">
-                                <h4 className="font-semibold text-gray-800 mb-2">Dependent Variable Trend</h4>
-                                <p className="text-sm text-gray-600 mb-4">{insights?.trendsSummary}</p>
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <LineChart data={insights?.trendData}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} />
-                                        <XAxis dataKey="date" stroke={chartColors.text} tick={{ fontSize: 12 }} />
-                                        <YAxis stroke={chartColors.kpi} tick={{ fontSize: 12, fill: chartColors.kpi }} />
-                                        <Tooltip wrapperClassName="glass-pane" />
-                                        <Legend wrapperStyle={{color: chartColors.text}}/>
-                                        <Line type="monotone" dataKey="kpi" name={Object.keys(selections).find(k => selections[k] === ColumnType.DEPENDENT_VARIABLE)} stroke={chartColors.kpi} strokeWidth={2} dot={false} />
-                                    </LineChart>
-                                </ResponsiveContainer>
+                        {/* MixMind Key Insights Panel */}
+                        <div className="glass-pane p-6 mb-8">
+                            <div className="flex items-center space-x-3 mb-6">
+                                <div className="flex-shrink-0">
+                                    <div className="w-8 h-8 bg-gradient-to-r from-teal-500 to-blue-600 rounded-lg flex items-center justify-center">
+                                        <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <h3 className="text-xl font-semibold text-gray-900">MixMind Key Insights</h3>
                             </div>
-                            <div>
-                                <h4 className="font-semibold text-gray-800 mb-2">AI Summary</h4>
-                                <div className="bg-gray-100 p-4 rounded-lg text-sm text-gray-700 space-y-2">
-                                    <p>{insights?.diagnosticsSummary}</p>
+                            
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Sales Trend Insights */}
+                                <div className="bg-gradient-to-br from-blue-50 to-cyan-50 p-5 rounded-lg border border-blue-200">
+                                    <div className="flex items-center space-x-2 mb-3">
+                                        <div className="w-5 h-5 bg-blue-500 rounded flex items-center justify-center">
+                                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+                                            </svg>
+                                        </div>
+                                        <h4 className="font-semibold text-blue-900">Sales Trend Insights</h4>
+                                    </div>
+                                    <p className="text-blue-800 text-sm leading-relaxed">{(insights as any)?.salesTrendInsights || insights?.trendsSummary}</p>
+                                </div>
+                                
+                                {/* Channel Execution Insights */}
+                                <div className="bg-gradient-to-br from-orange-50 to-amber-50 p-5 rounded-lg border border-orange-200">
+                                    <div className="flex items-center space-x-2 mb-3">
+                                        <div className="w-5 h-5 bg-orange-500 rounded flex items-center justify-center">
+                                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z"/>
+                                            </svg>
+                                        </div>
+                                        <h4 className="font-semibold text-orange-900">Channel Execution Insights</h4>
+                                    </div>
+                                    <p className="text-orange-800 text-sm leading-relaxed">{(insights as any)?.channelExecutionInsights || insights?.diagnosticsSummary}</p>
                                 </div>
                             </div>
                         </div>
-                        <div className="mt-8">
+
+                        {/* Sales Trend Chart - Full Width */}
+                        <div className="mb-8">
+                            <div className="flex items-center justify-between mb-3">
+                                <h4 className="font-semibold text-gray-800">Sales Trend (Latest 12 Months)</h4>
+                                <div className="flex bg-gray-100 rounded-md p-1">
+                                    <button
+                                        onClick={() => setSmoothingMode('raw')}
+                                        className={`px-3 py-1 text-sm font-medium rounded transition-colors ${
+                                            smoothingMode === 'raw'
+                                                ? 'bg-white text-gray-900 shadow-sm'
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        Raw
+                                    </button>
+                                    <button
+                                        onClick={() => setSmoothingMode('smoothed')}
+                                        className={`px-3 py-1 text-sm font-medium rounded transition-colors ${
+                                            smoothingMode === 'smoothed'
+                                                ? 'bg-white text-gray-900 shadow-sm'
+                                                : 'text-gray-600 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        Smoothed
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-4">{insights?.trendsSummary}</p>
+                            <ResponsiveContainer width="100%" height={350}>
+                                <ComposedChart 
+                                    data={smoothingMode === 'smoothed' ? smoothedTrendData : rawTrendData}
+                                    margin={{ top: 10, right: 30, left: 20, bottom: 60 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} />
+                                    <XAxis 
+                                        dataKey="date" 
+                                        stroke={chartColors.text} 
+                                        tick={{ fontSize: 10, fill: chartColors.text }} 
+                                        interval={Math.floor((rawTrendData.length || 52) / 8)}
+                                        angle={-45}
+                                        textAnchor="end"
+                                        height={60}
+                                        tickFormatter={(date) => {
+                                            try {
+                                                if (!date) return '';
+                                                const d = new Date(date);
+                                                if (isNaN(d.getTime())) return '';
+                                                return `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear().toString().slice(-2)}`;
+                                            } catch (e) {
+                                                console.error('Date formatting error:', e, date);
+                                                return '';
+                                            }
+                                        }}
+                                    />
+                                    <YAxis 
+                                        stroke={chartColors.kpi} 
+                                        tick={{ fontSize: 10, fill: chartColors.kpi }} 
+                                        domain={[0, 'dataMax * 1.1']}
+                                        tickFormatter={(value) => {
+                                            if (value >= 1000000) {
+                                                return `${(value / 1000000).toFixed(1)}M`;
+                                            } else if (value >= 1000) {
+                                                return `${(value / 1000).toFixed(0)}k`;
+                                            }
+                                            return value.toFixed(0);
+                                        }}
+                                    />
+                                    <Tooltip 
+                                        wrapperClassName="glass-pane" 
+                                        labelFormatter={(date) => {
+                                            const d = new Date(date);
+                                            return `Week of ${d.toLocaleDateString()}`;
+                                        }}
+                                        formatter={(value) => [value?.toLocaleString() || '0', 'TRx']}
+                                    />
+                                    
+                                    {/* Always show raw data as thin, semi-transparent line for honesty */}
+                                    {smoothingMode === 'smoothed' && (
+                                        <Line
+                                            type="natural"
+                                            dataKey="kpi"
+                                            data={rawTrendData}
+                                            stroke={chartColors.kpi}
+                                            strokeWidth={1}
+                                            strokeOpacity={0.3}
+                                            fill="none"
+                                            connectNulls={true}
+                                            dot={false}
+                                            name="Raw data"
+                                        />
+                                    )}
+                                    
+                                    {/* Main trend line/area */}
+                                    <Area 
+                                        type="natural"
+                                        dataKey="kpi" 
+                                        stroke={chartColors.kpi} 
+                                        strokeWidth={2.5}
+                                        fill={chartColors.kpi}
+                                        fillOpacity={smoothingMode === 'smoothed' ? 0.25 : 0.15}
+                                        connectNulls={true}
+                                        dot={false}
+                                        name={smoothingMode === 'smoothed' ? 'Smoothed (4-week avg)' : 'Raw TRx'}
+                                    />
+                                </ComposedChart>
+                            </ResponsiveContainer>
+                            
+                            {/* Caption */}
+                            <p className="text-xs text-gray-500 mt-2 text-center">
+                                Smoothing is for visualization only.
+                            </p>
+                        </div>
+                        
+                        {/* Channel Diagnostics Table */}
+                        <div className="mt-12">
                             <h4 className="font-semibold text-gray-800 mb-2">Channel Diagnostics</h4>
                             <div className="overflow-x-auto">
                             <table className="w-full text-left text-sm">
@@ -283,24 +442,6 @@ export const DataValidation: React.FC<DataValidationProps> = ({
 
     return (
         <div className="p-4 md:p-6 space-y-8 max-w-7xl mx-auto">
-            {/* Column Selection */}
-            <div className="glass-pane p-6">
-                 <h3 className="text-xl font-semibold text-gray-900 mb-4">1. Confirm Column Roles</h3>
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {edaResults.map(col => (
-                        <div key={col.columnName}>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">{col.columnName}</label>
-                            <select
-                            value={selections[col.columnName] || ''}
-                            onChange={(e) => onSelectionsChange({ ...selections, [col.columnName]: e.target.value as ColumnType })}
-                            className="w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-[#EC7200] text-gray-900"
-                            >
-                            {Object.values(ColumnType).map(ct => <option key={ct} value={ct}>{ct}</option>)}
-                            </select>
-                        </div>
-                    ))}
-                </div>
-            </div>
 
             {/* Initial Loader */}
             {isLoadingInsights && !insights && (
@@ -326,7 +467,7 @@ export const DataValidation: React.FC<DataValidationProps> = ({
                     )}
 
                     <div className={isLoadingInsights ? 'opacity-40 transition-opacity' : ''}>
-                        <h3 className="text-xl font-semibold text-gray-900 mb-6">2. Review Diagnostics & Data Quality</h3>
+                        <h2 className="text-2xl font-semibold text-gray-900 mb-6">Data Validation & Quality Analysis</h2>
                         
                         <div className="border-b border-gray-200 mb-6">
                             <nav className="-mb-px flex space-x-6" aria-label="Tabs">
@@ -353,6 +494,22 @@ export const DataValidation: React.FC<DataValidationProps> = ({
                         <div>
                             {renderTabContent()}
                         </div>
+                        
+                        {/* Proceed Button */}
+                        {insights && onProceed && (
+                            <div className="mt-8 flex justify-end">
+                                <button
+                                    onClick={onProceed}
+                                    disabled={isLoadingInsights}
+                                    className="primary-button flex items-center space-x-2"
+                                >
+                                    <span>Proceed to Feature Engineering</span>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                </button>
+                            </div>
+                        )}
                     </div>
                  </div>
             )}
