@@ -186,7 +186,11 @@ export const RevertedFinalReport: React.FC<RevertedFinalReportProps> = ({
         };
     });
     
-    const blendedROI = totalSpend > 0 ? totalRevenue / totalSpend : 0;
+    // Calculate blended ROI as weighted average of channel ROIs
+    const totalChannelSpend = reportData.reduce((sum, d) => sum + d.spend * 1000000, 0); // Convert back to dollars
+    const blendedROI = totalChannelSpend > 0 
+        ? reportData.reduce((sum, d) => sum + (d.avgROI * (d.spend * 1000000)), 0) / totalChannelSpend
+        : 0;
     const blendedRoiColor = blendedROI < 0 ? 'text-red-600' : 'text-green-600';
     
     const handleProceedToOptimizer = () => {
