@@ -61,12 +61,34 @@ export const trainModels = async (request: TrainingRequest): Promise<TrainingRes
       : 'Recalibrated models with updated parameters';
     
     // Generate new models with the selected channels and parameters
+    console.log('[TrainingAPI] Generating demo models with:', {
+      channels: request.selectedChannels,
+      paramRangesCount: request.paramRanges?.length || 0,
+      userContext
+    });
+    
     const newModels = generateDemoModels(
       request.selectedChannels,
       undefined, // userSelections
       userContext,
       request.paramRanges
     );
+    
+    console.log('[TrainingAPI] Generated models:', {
+      count: newModels.length,
+      modelIds: newModels.map(m => m.id),
+      modelChannels: newModels.map(m => ({ id: m.id, channels: m.channels }))
+    });
+    
+    if (newModels.length === 0) {
+      console.error('[TrainingAPI] No models generated! Check generateDemoModels function');
+      return {
+        success: false,
+        newModels: [],
+        message: 'No models were generated',
+        trainingId: ''
+      };
+    }
     
     // Mark new models as fresh and new with baseline tracking
     const freshModels = newModels.map((model, index) => {

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test AnalysisState & DecisionLog Persistence</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; margin-top: 0; }
+        h2 { color: #666; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover { background: #45a049; }
+        button.danger { background: #f44336; }
+        button.danger:hover { background: #da190b; }
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            border-left: 3px solid #4CAF50;
+        }
+        .success { color: #4CAF50; font-weight: bold; }
+        .info { color: #2196F3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test AnalysisState & DecisionLog Persistence</h1>
+        <p class="info">This page tests the localStorage persistence for the MMX app's AnalysisState and DecisionLog.</p>
+
+        <h2>Actions</h2>
+        <button onclick="seedTestData()">🌱 Seed Test Data</button>
+        <button onclick="displayStoredData()">🔍 Display Stored Data</button>
+        <button onclick="clearStoredData()" class="danger">🗑️ Clear All Data</button>
+        <button onclick="location.reload()">🔄 Reload Page (Test Persistence)</button>
+
+        <h2>Stored AnalysisState</h2>
+        <pre id="analysisStateDisplay">No data stored yet</pre>
+
+        <h2>Stored DecisionLog</h2>
+        <pre id="decisionLogDisplay">No data stored yet</pre>
+
+        <h2>Test Results</h2>
+        <div id="testResults"></div>
+    </div>
+
+    <script>
+        function seedTestData() {
+            const analysisState = {
+                grain: 'WEEK',
+                runTypes: ['CUSTOMER', 'GEO'],
+                channelOwnership: {
+                    'Google Ads': 'CUSTOMER',
+                    'Facebook': 'GEO',
+                    'TV': 'SHARED'
+                },
+                spendAvailability: 'FULL',
+                assumptions: [
+                    'Data is weekly aggregated',
+                    'All channels have complete spend data',
+                    'Seasonality is accounted for in controls'
+                ],
+                riskFlags: [
+                    {
+                        id: 'risk_1',
+                        severity: 'MEDIUM',
+                        message: 'Limited historical data for TV channel'
+                    },
+                    {
+                        id: 'risk_2',
+                        severity: 'LOW',
+                        message: 'Potential multicollinearity between digital channels'
+                    }
+                ],
+                lockedDecisions: ['decision_1']
+            };
+
+            const decisionLog = [
+                {
+                    id: 'decision_1',
+                    step: 2, // DataValidation
+                    type: 'LOCK',
+                    summary: 'Locked column assignments',
+                    details: 'User confirmed column types after EDA review',
+                    status: 'LOCKED',
+                    timestamp: Date.now() - 3600000 // 1 hour ago
+                },
+                {
+                    id: 'decision_2',
+                    step: 3, // FeatureEngineering
+                    type: 'RECOMMENDATION',
+                    summary: 'Recommended adstock ranges',
+                    details: 'Agent suggested 0-7 day adstock for digital channels based on typical response patterns',
+                    status: 'ACTIVE',
+                    timestamp: Date.now() - 1800000 // 30 min ago
+                },
+                {
+                    id: 'decision_3',
+                    step: 3,
+                    type: 'WARNING',
+                    summary: 'High correlation warning',
+                    details: 'Google Ads and Bing Ads show 0.85 correlation - consider combining',
+                    status: 'ACTIVE',
+                    timestamp: Date.now() - 900000 // 15 min ago
+                }
+            ];
+
+            localStorage.setItem('mmx_analysisState', JSON.stringify(analysisState));
+            localStorage.setItem('mmx_decisionLog', JSON.stringify(decisionLog));
+
+            document.getElementById('testResults').innerHTML = '<p class="success">✅ Test data seeded successfully!</p>';
+            displayStoredData();
+        }
+
+        function displayStoredData() {
+            const analysisState = localStorage.getItem('mmx_analysisState');
+            const decisionLog = localStorage.getItem('mmx_decisionLog');
+
+            if (analysisState) {
+                document.getElementById('analysisStateDisplay').textContent =
+                    JSON.stringify(JSON.parse(analysisState), null, 2);
+            } else {
+                document.getElementById('analysisStateDisplay').textContent = 'No data stored yet';
+            }
+
+            if (decisionLog) {
+                const log = JSON.parse(decisionLog);
+                document.getElementById('decisionLogDisplay').textContent =
+                    JSON.stringify(log, null, 2);
+
+                // Show test results
+                document.getElementById('testResults').innerHTML = `
+                    <p class="success">✅ Data found in localStorage!</p>
+                    <p><strong>Analysis State:</strong> ${analysisState ? 'Present' : 'Missing'}</p>
+                    <p><strong>Decision Log:</strong> ${log.length} decisions</p>
+                    <p><strong>Assumptions:</strong> ${JSON.parse(analysisState).assumptions.length} items</p>
+                    <p><strong>Risk Flags:</strong> ${JSON.parse(analysisState).riskFlags.length} flags</p>
+                    <p><strong>Locked Decisions:</strong> ${JSON.parse(analysisState).lockedDecisions.length} items</p>
+                `;
+            } else {
+                document.getElementById('decisionLogDisplay').textContent = 'No data stored yet';
+            }
+        }
+
+        function clearStoredData() {
+            localStorage.removeItem('mmx_analysisState');
+            localStorage.removeItem('mmx_decisionLog');
+            document.getElementById('testResults').innerHTML = '<p style="color: orange;">⚠️ All data cleared from localStorage</p>';
+            displayStoredData();
+        }
+
+        // Auto-display on page load
+        window.addEventListener('load', displayStoredData);
+    </script>
+</body>
+</html>

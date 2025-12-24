@@ -232,3 +232,61 @@ export interface OptimizerInteractionResponse {
     text: string;
     newScenario: OptimizerScenario;
 }
+
+export interface RiskFlag {
+  id: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH';
+  message: string;
+}
+
+export interface AnalysisState {
+  grain?: 'WEEK' | 'MONTH';
+  runTypes: ('CUSTOMER' | 'GEO')[];
+  channelOwnership: Record<string, 'CUSTOMER' | 'GEO' | 'SHARED'>;
+  spendAvailability: 'NONE' | 'PARTIAL' | 'FULL';
+  assumptions: string[];
+  riskFlags: RiskFlag[];
+  lockedDecisions: string[];
+}
+
+export interface DecisionRecord {
+  id: string;
+  step: AppStep;
+  type: 'RECOMMENDATION' | 'WARNING' | 'LOCK' | 'OVERRIDE';
+  summary: string;
+  details: string;
+  status: 'ACTIVE' | 'OVERRIDDEN' | 'LOCKED';
+  timestamp: number;
+}
+
+export interface CriticWarning {
+  id: string;
+  rule: string;
+  severity: 'WARNING' | 'ERROR';
+  title: string;
+  explanation: string;
+  recommendation: string;
+  canOverride: boolean;
+  step: AppStep;
+  context: Record<string, any>;
+}
+
+export interface ModelConsistency {
+  overallAgreementScore: number; // 0-100
+  conflictingChannels: {
+    channel: string;
+    customerROI: number;
+    geoROI: number;
+    difference: number;
+    direction: 'CUSTOMER_HIGHER' | 'GEO_HIGHER';
+  }[];
+  recommendedOwnerModel: 'CUSTOMER' | 'GEO' | 'DUAL';
+  reasoning: string;
+  channelAgreement: {
+    channel: string;
+    agreementScore: number; // 0-100
+    consistent: boolean;
+  }[];
+}
+
+export type ModelLens = 'CUSTOMER' | 'GEO';

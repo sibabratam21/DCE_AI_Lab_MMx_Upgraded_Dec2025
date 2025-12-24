@@ -54,11 +54,13 @@ export const EnhancedModelLeaderboard: React.FC<EnhancedModelLeaderboardProps> =
 
   // Filter and group models
   const { filteredModels, groupedModels, hasMatchingModels, hasStaleModels } = useMemo(() => {
-    console.log('Filtering models:', {
+    console.log('[EnhancedModelLeaderboard] Filtering models:', {
       totalModels: models.length,
       selectedChannels,
       filters,
-      sampleModel: models[0]
+      sampleModel: models[0],
+      allModelIds: models.map(m => m.id),
+      allModelChannels: models.map(m => ({ id: m.id, channels: m.channels }))
     });
 
     let filtered = models.filter((model, index) => {
@@ -70,6 +72,14 @@ export const EnhancedModelLeaderboard: React.FC<EnhancedModelLeaderboardProps> =
         filterReasons.push(`Channel mismatch: ${JSON.stringify(model.channels)} vs ${JSON.stringify(selectedChannels)}`);
         if (!filters.showLegacy) {
           // Only exclude if legacy mode is OFF
+          if (index < 3 || model.isNew) {
+            console.log(`[EnhancedModelLeaderboard] Model ${model.id} filtered out due to channel mismatch:`, {
+              modelChannels: model.channels,
+              selectedChannels,
+              isNew: model.isNew,
+              isRecalibrated: (model as any).isRecalibrated
+            });
+          }
           return false;
         }
       }

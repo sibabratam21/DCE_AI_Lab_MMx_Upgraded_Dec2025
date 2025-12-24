@@ -47,29 +47,32 @@ export const BaselineAwareRecalibrationWizard: React.FC<BaselineAwareRecalibrati
     activeModel?.channels || currentChannels
   );
   
-  // Extract baseline parameters from active model
+  // Extract baseline parameters from active model (only for selected channels)
   const baselineParams = useMemo(() => {
     if (!activeModel) return {};
     
     const params: Record<string, BaselineParam> = {};
     activeModel.details.forEach((detail: ModelDetail) => {
-      params[detail.name] = {
-        channel: detail.name,
-        adstockDecay: detail.adstock,
-        lagWeeks: detail.lag,
-        transform: detail.transform,
-        // These would come from extended model data in a real implementation
-        hillK: 2.0, // Default S-curve parameter
-        reg: 0.1   // Default regularization
-      };
+      // Only include baseline params for channels that are actually selected
+      if (selectedChannels.includes(detail.name)) {
+        params[detail.name] = {
+          channel: detail.name,
+          adstockDecay: detail.adstock,
+          lagWeeks: detail.lag,
+          transform: detail.transform,
+          // These would come from extended model data in a real implementation
+          hillK: 2.0, // Default S-curve parameter
+          reg: 0.1   // Default regularization
+        };
+      }
     });
     
     return params;
-  }, [activeModel]);
+  }, [activeModel, selectedChannels]);
 
   const [paramControls, setParamControls] = useState<Record<string, ParamControl>>(() => {
     const controls: Record<string, ParamControl> = {};
-    (activeModel?.channels || currentChannels).forEach(channel => {
+    selectedChannels.forEach(channel => {
       controls[channel] = {
         locked: false,
         delta: 0.20, // ±20% default
@@ -154,6 +157,8 @@ export const BaselineAwareRecalibrationWizard: React.FC<BaselineAwareRecalibrati
   const handleConfirmAndRecalibrate = () => {
     const paramRanges = generateParamRanges();
     
+    console.log('[BaselineAwareRecalibrationWizard] Generated param ranges:', paramRanges);
+    
     const config: any = {
       selectedChannels,
       paramRanges
@@ -169,6 +174,8 @@ export const BaselineAwareRecalibrationWizard: React.FC<BaselineAwareRecalibrati
         }
       };
     }
+
+    console.log('[BaselineAwareRecalibrationWizard] Final config for recalibration:', config);
 
     onRecalibrate(config);
   };

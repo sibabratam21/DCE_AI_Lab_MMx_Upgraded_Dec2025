@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Recalibration</title>
+</head>
+<body>
+    <h1>Test Recalibration</h1>
+    <p>Open the browser console and navigate to the app at http://localhost:5174</p>
+    <p>Then follow these steps:</p>
+    <ol>
+        <li>Go to the Modeling tab</li>
+        <li>Click "Recalibrate"</li>
+        <li>Select only 2 channels in the wizard</li>
+        <li>Complete the wizard and click "Start Training"</li>
+        <li>Watch the console for these debug messages:</li>
+    </ol>
+    <h2>Expected Console Output:</h2>
+    <pre>
+[BaselineAwareRecalibrationWizard] Generated param ranges: [...]
+[BaselineAwareRecalibrationWizard] Final config for recalibration: {...}
+[ModelingView] Starting recalibration with config: {...}
+[ModelingView] Calling trainModels API...
+[TrainingAPI] Starting model training with request: {...}
+[TrainingAPI] Generating demo models with: {...}
+[generateDemoModels] Called with: {...}
+[generateDemoModels] Processing algorithm configs: {...}
+[generateDemoModels] Processing Bayesian Regression with 3 variants
+[generateDemoModels] Pushing model bayesian_regression_1 with channels: [...]
+[generateDemoModels] Generated models before sorting: {...}
+[generateDemoModels] Returning sorted models: {...}
+[TrainingAPI] Generated models: {...}
+[ModelingView] TrainModels API response: {...}
+[ModelingView] Training completed with result: {...}
+[ModelingView] Adding X new models: [...]
+[ModelingView] Called onModelsUpdated callback
+[App.tsx] onModelsUpdated callback received: {...}
+[App.tsx] Processing recalibrated model: {...}
+[App.tsx] Updated leaderboard: {...}
+[EnhancedModelLeaderboard] Filtering models: {...}
+    </pre>
+    
+    <h2>Common Issues to Check:</h2>
+    <ul>
+        <li>If models are generated but filtered out: Check for "Model X filtered out due to channel mismatch" messages</li>
+        <li>If no models generated: Check "[TrainingAPI] Generated models: { count: 0 }"</li>
+        <li>If models not reaching leaderboard: Check "[App.tsx] onModelsUpdated callback received"</li>
+    </ul>
+</body>
+</html>

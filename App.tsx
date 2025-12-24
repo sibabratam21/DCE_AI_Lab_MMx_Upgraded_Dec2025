@@ -6,7 +6,7 @@ import {
   import { generateDemoInsights as fastDemoInsights, generateDemoModels } from './services/demoSimulation';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { AppStep, EdaResult, UserColumnSelection, ColumnType, AgentMessage, ParsedData, EdaInsights, FeatureParams, ModelRun, ChannelDiagnostic, ColumnSummaryItem, ModelingInteractionResponse, CalibrationInteractionResponse, ModelDetail, OptimizerScenario, OptimizerInteractionResponse, ChatAction } from './types';
+import { AppStep, EdaResult, UserColumnSelection, ColumnType, AgentMessage, ParsedData, EdaInsights, FeatureParams, ModelRun, ChannelDiagnostic, ColumnSummaryItem, ModelingInteractionResponse, CalibrationInteractionResponse, ModelDetail, OptimizerScenario, OptimizerInteractionResponse, ChatAction, AnalysisState, DecisionRecord, RiskFlag } from './types';
 import {
   analyzeColumns,
   recommendFeatures,
@@ -28,8 +28,8 @@ import { csvParse, DSVRowString } from 'd3-dsv';
 import { DataValidation } from './components/DataValidation';
 import { Configure } from './components/Configure';
 import { FeatureEngineering } from './components/FeatureEngineering';
-import { ModelingView } from './components/ModelingView';
-import { RevertedFinalReport } from './components/RevertedFinalReport';
+import { DualModelView } from './components/DualModelView';
+import { DualModelReport } from './components/DualModelReport';
 import { EnhancedOptimizer } from './components/EnhancedOptimizer';
 import { ColumnSummaryTable } from './components/ColumnSummaryTable';
 import { generateInitialScenarios } from './services/optimizerUtils.ts';
@@ -39,41 +39,133 @@ import { LoginScreen } from './components/LoginScreen.tsx';
 import { TrainingProgress } from './components/TrainingProgress.tsx';
 import { StagedModelTraining } from './components/StagedModelTraining';
 import { loadDemoDataset, getDemoDatasetInfo, isDemoModeAvailable, loadDatasetByFilename, AVAILABLE_DATASETS, DatasetInfo } from './services/demoDataService.ts';
+import { AgentPanel } from './components/AgentPanel';
+import { DecisionCheckpointModal, CheckpointItem } from './components/DecisionCheckpointModal';
+import { NextActionsBar } from './components/NextActionsBar';
+import { planNext, ProposedAction } from './services/agentPlanner';
+import { CriticWarningModal } from './components/CriticWarningModal';
+import { criticizeDecision } from './services/agentCritic';
+import type { CriticWarning } from './types';
+import { ProductModeToggle } from './components/ProductModeToggle';
+import {
+  getDeterministicResponse,
+  getDeterministicConfirmationIntent,
+  getDeterministicFeatureSummary,
+  getDeterministicColumnSummary
+} from './services/deterministicResponses';
 
 
 const App: React.FC = () => {
   // Feature flags
   const CHAT_UI_PILLS_ONLY = true; // Default ON - suppress suggestion bubbles, show only pills
-  
+
+  // Product Mode toggle - disable Gemini calls, use deterministic logic only
+  const [productMode, setProductMode] = useState<boolean>(true); // Default to Product mode for safety
+
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  
+
+  // Decision Checkpoint Modal state
+  const [checkpointModalConfig, setCheckpointModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    step: AppStep;
+    items: CheckpointItem[];
+    impact: string[];
+    onConfirm: () => void;
+    onEdit: () => void;
+    onOverride?: (reason: string) => void;
+    allowOverride?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    step: AppStep.Welcome,
+    items: [],
+    impact: [],
+    onConfirm: () => {},
+    onEdit: () => {}
+  });
+
+  // Critic Warning Modal state
+  const [criticWarnings, setCriticWarnings] = useState<CriticWarning[]>([]);
+  const [isCriticModalOpen, setIsCriticModalOpen] = useState<boolean>(false);
+  const [criticOnAcknowledge, setCriticOnAcknowledge] = useState<(() => void) | null>(null);
+  const [criticOnOverride, setCriticOnOverride] = useState<((reason: string) => void) | null>(null);
+  const [criticOnGoBack, setCriticOnGoBack] = useState<(() => void) | null>(null);
+
+  // Agent-owned AnalysisState and DecisionLog - DECLARE BEFORE useEffect
+  const [analysisState, setAnalysisState] = useState<AnalysisState>({
+    runTypes: [],
+    channelOwnership: {},
+    spendAvailability: 'NONE',
+    assumptions: [],
+    riskFlags: [],
+    lockedDecisions: []
+  });
+  const [decisionLog, setDecisionLog] = useState<DecisionRecord[]>([]);
+
   // Check for existing authentication on app load
   useEffect(() => {
     const isAuth = sessionStorage.getItem('mmx_authenticated') === 'true';
     setIsAuthenticated(isAuth);
   }, []);
-  
+
   // Add initial welcome message when authenticated
   useEffect(() => {
     if (isAuthenticated && agentMessages.length === 0) {
       const timer = setTimeout(() => {
         const id = Date.now() + Math.random();
-        setAgentMessages([{ 
-          id, 
-          sender: 'ai' as const, 
-          text: "Hi! I'm your MMM assistant. Upload your marketing data to start analyzing channel performance and optimizing budgets.", 
-          actions: [] 
+        setAgentMessages([{
+          id,
+          sender: 'ai' as const,
+          text: "Hi! I'm your MMM assistant. Upload your marketing data to start analyzing channel performance and optimizing budgets.",
+          actions: []
         }]);
       }, 500);
       return () => clearTimeout(timer);
     }
   }, [isAuthenticated]);
-  
+
+  // Restore analysisState and decisionLog from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedAnalysisState = localStorage.getItem('mmx_analysisState');
+      const savedDecisionLog = localStorage.getItem('mmx_decisionLog');
+
+      if (savedAnalysisState) {
+        setAnalysisState(JSON.parse(savedAnalysisState));
+      }
+
+      if (savedDecisionLog) {
+        setDecisionLog(JSON.parse(savedDecisionLog));
+      }
+    } catch (error) {
+      console.error('Failed to restore analysis state from localStorage:', error);
+    }
+  }, []);
+
+  // Persist analysisState to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('mmx_analysisState', JSON.stringify(analysisState));
+    } catch (error) {
+      console.error('Failed to persist analysis state to localStorage:', error);
+    }
+  }, [analysisState]);
+
+  // Persist decisionLog to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('mmx_decisionLog', JSON.stringify(decisionLog));
+    } catch (error) {
+      console.error('Failed to persist decision log to localStorage:', error);
+    }
+  }, [decisionLog]);
+
   const handleLogin = () => {
     setIsAuthenticated(true);
   };
-  
+
   const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.Welcome);
   const [completedSteps, setCompletedSteps] = useState<Set<AppStep>>(new Set([AppStep.Welcome]));
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
@@ -104,7 +196,7 @@ const App: React.FC = () => {
   const [hasRunInitialEda, setHasRunInitialEda] = useState<boolean>(false);
   const [isDemoDataAvailable, setIsDemoDataAvailable] = useState<boolean>(false);
   const [selectedDataset, setSelectedDataset] = useState<DatasetInfo | null>(null);
-  
+
   // Training progress state
   const [showTrainingProgress, setShowTrainingProgress] = useState(false);
   
@@ -132,25 +224,205 @@ const App: React.FC = () => {
 
   // Check if user has demonstrated familiarity with interface
   const userKnowsInterface = useCallback(() => {
-    return userInteractionHistory.has('column_assignment') || 
+    return userInteractionHistory.has('column_assignment') ||
            userInteractionHistory.has('approve_exclude') ||
            userInteractionHistory.has('chat_interaction') ||
            agentMessages.length > 3;
   }, [userInteractionHistory, agentMessages.length]);
+
+  // Helper functions for AnalysisState and DecisionLog
+  const logDecision = useCallback((record: Omit<DecisionRecord, 'id' | 'timestamp'>) => {
+    const newRecord: DecisionRecord = {
+      ...record,
+      id: `decision_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: Date.now()
+    };
+    setDecisionLog(prev => [...prev, newRecord]);
+    return newRecord.id;
+  }, []);
+
+  const lockDecision = useCallback((id: string) => {
+    setDecisionLog(prev =>
+      prev.map(record =>
+        record.id === id ? { ...record, status: 'LOCKED' as const } : record
+      )
+    );
+    setAnalysisState(prev => ({
+      ...prev,
+      lockedDecisions: [...prev.lockedDecisions, id]
+    }));
+  }, []);
+
+  const addRiskFlag = useCallback((flag: Omit<RiskFlag, 'id'>) => {
+    const newFlag: RiskFlag = {
+      ...flag,
+      id: `risk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    };
+    setAnalysisState(prev => ({
+      ...prev,
+      riskFlags: [...prev.riskFlags, newFlag]
+    }));
+    return newFlag.id;
+  }, []);
+
+  // Helper function to show decision checkpoint modal
+  const showCheckpoint = useCallback((config: {
+    title: string;
+    step: AppStep;
+    items: CheckpointItem[];
+    impact: string[];
+    onConfirm: () => void;
+    onEdit: () => void;
+    onOverride?: (reason: string) => void;
+    allowOverride?: boolean;
+  }) => {
+    setCheckpointModalConfig({
+      isOpen: true,
+      ...config
+    });
+  }, []);
+
+  const closeCheckpoint = useCallback(() => {
+    setCheckpointModalConfig(prev => ({ ...prev, isOpen: false }));
+  }, []);
+
+  // Helper functions for critic warnings
+  const showCriticWarnings = useCallback((
+    warnings: CriticWarning[],
+    onAcknowledge: () => void,
+    onOverride: (reason: string) => void,
+    onGoBack: () => void
+  ) => {
+    setCriticWarnings(warnings);
+    setCriticOnAcknowledge(() => onAcknowledge);
+    setCriticOnOverride(() => onOverride);
+    setCriticOnGoBack(() => onGoBack);
+    setIsCriticModalOpen(true);
+  }, []);
+
+  const closeCriticModal = useCallback(() => {
+    setIsCriticModalOpen(false);
+    setCriticWarnings([]);
+    setCriticOnAcknowledge(null);
+    setCriticOnOverride(null);
+    setCriticOnGoBack(null);
+  }, []);
+
+  // Run critic check at key decision points
+  const runCriticCheck = useCallback(
+    (onProceed: () => void, onCancel: () => void) => {
+      const warnings = criticizeDecision({
+        analysisState,
+        currentStep,
+        userSelections,
+        featureParams,
+        parsedData
+      });
+
+      if (warnings.length > 0) {
+        // Show warnings
+        showCriticWarnings(
+          warnings,
+          // On Acknowledge
+          () => {
+            closeCriticModal();
+            // Log acknowledgment
+            warnings.forEach(w => {
+              logDecision({
+                step: currentStep,
+                type: 'WARNING',
+                summary: `Acknowledged critic warning: ${w.title}`,
+                details: w.explanation,
+                status: 'ACTIVE'
+              });
+            });
+            onProceed();
+          },
+          // On Override
+          (reason: string) => {
+            closeCriticModal();
+            // Log override with reason
+            warnings.forEach(w => {
+              logDecision({
+                step: currentStep,
+                type: 'OVERRIDE',
+                summary: `Overrode critic warning: ${w.title}`,
+                details: `User reason: ${reason}. Warning: ${w.explanation}`,
+                status: 'ACTIVE'
+              });
+            });
+            onProceed();
+          },
+          // On Go Back
+          () => {
+            closeCriticModal();
+            onCancel();
+          }
+        );
+      } else {
+        // No warnings, proceed
+        onProceed();
+      }
+    },
+    [analysisState, currentStep, userSelections, featureParams, parsedData, showCriticWarnings, closeCriticModal, logDecision]
+  );
 
   useEffect(() => {
     scrollToBottom();
   }, [agentMessages]);
   
   const addMessage = useCallback((
-    text: string | React.ReactNode, 
-    sender: 'ai' | 'user' = 'ai', 
-    actions?: ChatAction[], 
+    text: string | React.ReactNode,
+    sender: 'ai' | 'user' = 'ai',
+    actions?: ChatAction[],
     meta?: { kind?: 'suggestion' | 'insight' | 'validate_suggestions'; suggestion?: boolean; }
   ) => {
     const id = Date.now() + Math.random();
     setAgentMessages(prev => [...prev, { id, sender, text, actions: actions || [], meta }]);
   }, []);
+
+  // Compute proposed actions using rule-based planner
+  const proposedActions = React.useMemo<ProposedAction[]>(() => {
+    return planNext({
+      analysisState,
+      currentStep,
+      userSelections,
+      featureParams,
+      modelLeaderboard,
+      activeModelId
+    });
+  }, [analysisState, currentStep, userSelections, featureParams, modelLeaderboard, activeModelId]);
+
+  // Handle action clicks from NextActionsBar
+  const handleNextActionClick = useCallback((actionId: string) => {
+    // Map action IDs to specific behaviors
+    console.log(`Action clicked: ${actionId}`);
+
+    switch(actionId) {
+      case 'global_no_ownership':
+        // Navigate to Configure step for ownership assignment
+        setCurrentStep(AppStep.Configure);
+        addMessage(
+          "Let's assign channel ownership. I've taken you to the Configure step where you can assign each marketing channel to CUSTOMER-level or GEO-level models.",
+          'ai'
+        );
+        break;
+      case 'configure_dual_models':
+        // Navigate to Configure step for dual model setup
+        setCurrentStep(AppStep.Configure);
+        addMessage(
+          "To enable dual model analysis (CUSTOMER vs GEO comparison), please assign ownership to your marketing channels in the section below.",
+          'ai'
+        );
+        break;
+      default:
+        // Generic handler for other actions
+        addMessage(
+          `Action "${actionId}" triggered. This feature is under development.`,
+          'ai'
+        );
+    }
+  }, [addMessage]);
 
   // Generate dynamic suggestions based on current state and context
   const getDynamicSuggestions = useCallback((): ChatAction[] => {
@@ -766,12 +1038,29 @@ Review each channel's settings in the table below. Adjust based on your business
       const approvedActivityChannels = featureParams.map(f => f.channel);
       const newResults = generateDemoModels(approvedActivityChannels, userSelections, userQuery, featureParams, edaInsights?.channelDiagnostics);
       
-      // Mark new results with isNew flag and generate unique IDs
-      const markedResults = newResults.map((model, index) => ({
-        ...model,
-        id: `${model.id}_${Date.now()}_${index}`, // Ensure unique IDs
-        isNew: true
-      }));
+      // Generate simple incremental IDs for new models
+      const existingCount = modelLeaderboard.length;
+      const markedResults = newResults.map((model, index) => {
+        // Extract algorithm abbreviation
+        const algoAbbrev = model.algo
+          .split(' ')
+          .map(word => word[0])
+          .join('')
+          .toUpperCase(); // e.g., "BR" for Bayesian Regression, "NN" for NN
+        
+        // Create simple ID like "BR_01" or "NN_05"
+        const modelNumber = (existingCount + index + 1).toString().padStart(2, '0');
+        const simpleId = `${algoAbbrev}_${modelNumber}`;
+        
+        return {
+          ...model,
+          id: simpleId,
+          isNew: true,
+          originalId: model.id, // Keep original ID for reference
+          // Ensure channels are preserved
+          channels: model.channels || []
+        };
+      });
       
       // Mark all existing models as not new anymore
       const existingModels = modelLeaderboard.map(m => ({ ...m, isNew: false }));
@@ -812,12 +1101,29 @@ Review each channel's settings in the table below. Adjust based on your business
       const approvedActivityChannels = featureParams.map(f => f.channel);
       const newResults = generateDemoModels(approvedActivityChannels, userSelections, userQuery, featureParams, edaInsights?.channelDiagnostics);
       
-      // Mark new results with isNew flag and generate unique IDs
-      const markedResults = newResults.map((model, index) => ({
-        ...model,
-        id: `${model.id}_${Date.now()}_${index}`, // Ensure unique IDs
-        isNew: true
-      }));
+      // Generate simple incremental IDs for new models
+      const existingCount = modelLeaderboard.length;
+      const markedResults = newResults.map((model, index) => {
+        // Extract algorithm abbreviation
+        const algoAbbrev = model.algo
+          .split(' ')
+          .map(word => word[0])
+          .join('')
+          .toUpperCase(); // e.g., "BR" for Bayesian Regression, "NN" for NN
+        
+        // Create simple ID like "BR_01" or "NN_05"
+        const modelNumber = (existingCount + index + 1).toString().padStart(2, '0');
+        const simpleId = `${algoAbbrev}_${modelNumber}`;
+        
+        return {
+          ...model,
+          id: simpleId,
+          isNew: true,
+          originalId: model.id, // Keep original ID for reference
+          // Ensure channels are preserved
+          channels: model.channels || []
+        };
+      });
       
       // Mark all existing models as not new anymore
       const existingModels = modelLeaderboard.map(m => ({ ...m, isNew: false }));
@@ -1222,10 +1528,68 @@ Review each channel's settings in the table below. Adjust based on your business
         }
         
         if (awaitingColumnConfirmation) {
-          const confirmation = await getConfirmationIntent(query);
+          const confirmation = productMode
+            ? getDeterministicConfirmationIntent(query)
+            : await getConfirmationIntent(query);
           if (confirmation === 'affirmative') {
               setAwaitingColumnConfirmation(false);
-              await handleProceedWithColumnSelection();
+
+              // Show checkpoint modal before proceeding
+              const checkpointItems: CheckpointItem[] = [];
+
+              const dependentVars = Object.keys(userSelections).filter(k => userSelections[k] === ColumnType.DEPENDENT_VARIABLE);
+              const spendChannels = Object.keys(userSelections).filter(k => userSelections[k] === ColumnType.MARKETING_SPEND);
+              const activityChannels = Object.keys(userSelections).filter(k => userSelections[k] === ColumnType.MARKETING_ACTIVITY);
+              const timeCol = Object.keys(userSelections).find(k => userSelections[k] === ColumnType.TIME_DIMENSION);
+              const geoCol = Object.keys(userSelections).find(k => userSelections[k] === ColumnType.GEO_DIMENSION);
+              const controlVars = Object.keys(userSelections).filter(k => userSelections[k] === ColumnType.CONTROL_VARIABLE);
+
+              checkpointItems.push({ label: 'Dependent Variable (KPI)', value: dependentVars.join(', ') || 'None selected', isWarning: dependentVars.length === 0 });
+              checkpointItems.push({ label: 'Marketing Spend Channels', value: spendChannels.join(', ') || 'None', isWarning: spendChannels.length === 0 && activityChannels.length === 0 });
+              checkpointItems.push({ label: 'Marketing Activity Channels', value: activityChannels.join(', ') || 'None' });
+              checkpointItems.push({ label: 'Time Dimension', value: timeCol || 'None selected', isWarning: !timeCol });
+              if (geoCol) checkpointItems.push({ label: 'Geographic Dimension', value: geoCol });
+              if (controlVars.length > 0) checkpointItems.push({ label: 'Control Variables', value: controlVars.join(', ') });
+
+              showCheckpoint({
+                title: 'Lock Column Assignments',
+                step: AppStep.Configure,
+                items: checkpointItems,
+                impact: [
+                  'These column assignments will determine your model structure',
+                  'All subsequent analysis (EDA, feature engineering, modeling) will use these assignments',
+                  'Changing columns later will require re-running the entire workflow'
+                ],
+                onConfirm: () => {
+                  closeCheckpoint();
+
+                  // Run critic check before proceeding
+                  runCriticCheck(
+                    // On Proceed
+                    () => {
+                      const decisionId = logDecision({
+                        step: AppStep.Configure,
+                        type: 'LOCK',
+                        summary: 'Locked column assignments',
+                        details: `User confirmed column types: ${dependentVars.length} dependent variable(s), ${spendChannels.length + activityChannels.length} marketing channels, ${controlVars.length} controls`,
+                        status: 'ACTIVE'
+                      });
+                      lockDecision(decisionId);
+                      handleProceedWithColumnSelection();
+                    },
+                    // On Cancel
+                    () => {
+                      setAwaitingColumnConfirmation(true);
+                      addMessage("Please review and adjust your column assignments based on the warnings.", 'ai');
+                    }
+                  );
+                },
+                onEdit: () => {
+                  closeCheckpoint();
+                  setAwaitingColumnConfirmation(true);
+                  addMessage("No problem. Please adjust the column types on the right. Let me know when you're ready to try again.", 'ai');
+                }
+              });
           } else if (confirmation === 'negative') {
               addMessage("No problem. Please adjust the column types on the right. Let me know when you're ready to try again.", 'ai');
           } else { // 'other' case
@@ -1234,9 +1598,69 @@ Review each channel's settings in the table below. Adjust based on your business
               addMessage("When you're ready to proceed with the column assignments, please say 'yes'.", 'ai');
           }
         } else if (awaitingEdaConfirmation) {
-            const confirmation = await getConfirmationIntent(query);
+            const confirmation = productMode
+              ? getDeterministicConfirmationIntent(query)
+              : await getConfirmationIntent(query);
             if(confirmation === 'affirmative') {
-              await handleProceedToFeatures();
+              setAwaitingEdaConfirmation(false);
+
+              // Show checkpoint modal for channel approval/exclusion
+              const approvedChannels = channelDiagnostics.filter(c => c.isApproved);
+              const excludedChannels = channelDiagnostics.filter(c => !c.isApproved);
+
+              const checkpointItems: CheckpointItem[] = [];
+              checkpointItems.push({
+                label: 'Approved Channels',
+                value: approvedChannels.map(c => c.name).join(', ') || 'None',
+                isWarning: approvedChannels.length === 0
+              });
+              if (excludedChannels.length > 0) {
+                checkpointItems.push({
+                  label: 'Excluded Channels',
+                  value: excludedChannels.map(c => c.name).join(', '),
+                  isWarning: true
+                });
+              }
+
+              showCheckpoint({
+                title: 'Lock Channel Selection',
+                step: AppStep.DataValidation,
+                items: checkpointItems,
+                impact: [
+                  `${approvedChannels.length} channels will be included in feature engineering`,
+                  'Excluded channels will not be part of the MMM model',
+                  'Feature parameters will be generated for approved channels only'
+                ],
+                onConfirm: () => {
+                  closeCheckpoint();
+                  const decisionId = logDecision({
+                    step: AppStep.DataValidation,
+                    type: 'LOCK',
+                    summary: 'Locked channel approval decisions',
+                    details: `Approved ${approvedChannels.length} channels, excluded ${excludedChannels.length} channels. Excluded: ${excludedChannels.map(c => c.name).join(', ') || 'none'}`,
+                    status: 'ACTIVE'
+                  });
+                  lockDecision(decisionId);
+                  handleProceedToFeatures();
+                },
+                onEdit: () => {
+                  closeCheckpoint();
+                  setAwaitingEdaConfirmation(true);
+                  addMessage("Okay, please continue to review the diagnostics and approve/exclude channels. Let me know when you are ready to proceed.", 'ai');
+                },
+                onOverride: (reason) => {
+                  closeCheckpoint();
+                  const decisionId = logDecision({
+                    step: AppStep.DataValidation,
+                    type: 'OVERRIDE',
+                    summary: 'Proceeded with channel selection despite warnings',
+                    details: `User reason: ${reason}. Approved ${approvedChannels.length} channels, excluded ${excludedChannels.length} channels.`,
+                    status: 'ACTIVE'
+                  });
+                  handleProceedToFeatures();
+                },
+                allowOverride: excludedChannels.length > 0 || approvedChannels.length === 0
+              });
             } else if (confirmation === 'negative') {
               addMessage("Okay, please continue to review the diagnostics and approve/exclude channels. Let me know when you are ready to proceed.", 'ai');
             } else {
@@ -1256,9 +1680,58 @@ Review each channel's settings in the table below. Adjust based on your business
                 addMessage(summaryText, 'ai');
                 addMessage("Does this look right? If so, say 'proceed to modeling'.", 'ai');
             } else {
-                const confirmation = await getConfirmationIntent(query);
+                const confirmation = productMode
+                  ? getDeterministicConfirmationIntent(query)
+                  : await getConfirmationIntent(query);
                 if (confirmation === 'affirmative') {
-                    await handleRunModels();
+                    setAwaitingFeatureConfirmation(false);
+
+                    // Show checkpoint modal for feature engineering
+                    const checkpointItems: CheckpointItem[] = featureParams.map(fp => ({
+                      label: fp.channel,
+                      value: `Adstock: ${fp.adstock.min}-${fp.adstock.max}, Lag: ${fp.lag.min}-${fp.lag.max}, Transform: ${fp.transform}`,
+                      isWarning: false
+                    }));
+
+                    showCheckpoint({
+                      title: 'Lock Feature Engineering Parameters',
+                      step: AppStep.FeatureEngineering,
+                      items: checkpointItems,
+                      impact: [
+                        `${featureParams.length} channels will be modeled with these parameters`,
+                        'Model training will explore combinations within these ranges',
+                        'These settings will determine how marketing effects are captured'
+                      ],
+                      onConfirm: () => {
+                        closeCheckpoint();
+
+                        // Run critic check before proceeding to modeling
+                        runCriticCheck(
+                          // On Proceed
+                          () => {
+                            const decisionId = logDecision({
+                              step: AppStep.FeatureEngineering,
+                              type: 'LOCK',
+                              summary: 'Locked feature engineering parameters',
+                              details: `Confirmed parameters for ${featureParams.length} channels: ${featureParams.map(fp => fp.channel).join(', ')}`,
+                              status: 'ACTIVE'
+                            });
+                            lockDecision(decisionId);
+                            handleRunModels();
+                          },
+                          // On Cancel
+                          () => {
+                            setAwaitingFeatureConfirmation(true);
+                            addMessage("Please review and adjust the feature parameters based on the warnings.", 'ai');
+                          }
+                        );
+                      },
+                      onEdit: () => {
+                        closeCheckpoint();
+                        setAwaitingFeatureConfirmation(true);
+                        addMessage("No problem. Please continue to adjust the feature parameters. Let me know when you are ready to proceed again.", 'ai');
+                      }
+                    });
                 } else {
                     addMessage("No problem. Please continue to adjust the feature parameters. Let me know when you are ready to proceed again.", 'ai');
                 }
@@ -1276,9 +1749,73 @@ Review each channel's settings in the table below. Adjust based on your business
             addMessage(`You'd like to finalize model ${activeModelId}. Are you sure? This will generate the final report.`, 'ai');
             setAwaitingFinalizeConfirmation(true);
         } else if (awaitingFinalizeConfirmation) {
-            const confirmation = await getConfirmationIntent(query);
+            const confirmation = productMode
+              ? getDeterministicConfirmationIntent(query)
+              : await getConfirmationIntent(query);
             if (confirmation === 'affirmative') {
-                handleFinalizeModel();
+                setAwaitingFinalizeConfirmation(false);
+
+                // Show checkpoint modal before finalizing model
+                const activeModel = modelLeaderboard.find(m => m.id === activeModelId);
+                if (activeModel) {
+                  const checkpointItems: CheckpointItem[] = [
+                    { label: 'Model Algorithm', value: activeModel.algo },
+                    { label: 'Model Performance', value: `R² = ${(activeModel.rsq * 100).toFixed(1)}%, MAPE = ${activeModel.mape.toFixed(1)}%` },
+                    { label: 'Blended ROI', value: `${activeModel.roi.toFixed(2)}x` },
+                    { label: 'Channels Included', value: activeModel.details.filter(d => d.included).map(d => d.name).join(', ') }
+                  ];
+
+                  // Add warnings if present
+                  if (activeModel.diagnostics.weak_channels.length > 0) {
+                    checkpointItems.push({
+                      label: 'Weak Channels',
+                      value: activeModel.diagnostics.weak_channels.join(', '),
+                      isWarning: true
+                    });
+                  }
+
+                  showCheckpoint({
+                    title: 'Finalize Model for Production',
+                    step: AppStep.Modeling,
+                    items: checkpointItems,
+                    impact: [
+                      'This model will be used for the final report and optimization',
+                      'Model selection will be locked and cannot be changed without re-running',
+                      'Budget recommendations will be based on this model\'s coefficients'
+                    ],
+                    onConfirm: () => {
+                      closeCheckpoint();
+                      const decisionId = logDecision({
+                        step: AppStep.Modeling,
+                        type: 'LOCK',
+                        summary: `Finalized model ${activeModelId}`,
+                        details: `Model: ${activeModel.algo}, R²: ${(activeModel.rsq * 100).toFixed(1)}%, MAPE: ${activeModel.mape.toFixed(1)}%, ROI: ${activeModel.roi.toFixed(2)}x`,
+                        status: 'ACTIVE'
+                      });
+                      lockDecision(decisionId);
+                      handleFinalizeModel();
+                    },
+                    onEdit: () => {
+                      closeCheckpoint();
+                      setAwaitingFinalizeConfirmation(false);
+                      addMessage("Okay, finalization cancelled. You can continue to explore and calibrate the models.", 'ai');
+                    },
+                    onOverride: (reason) => {
+                      closeCheckpoint();
+                      const decisionId = logDecision({
+                        step: AppStep.Modeling,
+                        type: 'OVERRIDE',
+                        summary: `Finalized model ${activeModelId} despite warnings`,
+                        details: `User reason: ${reason}. Model: ${activeModel.algo}, Weak channels: ${activeModel.diagnostics.weak_channels.join(', ')}`,
+                        status: 'ACTIVE'
+                      });
+                      handleFinalizeModel();
+                    },
+                    allowOverride: activeModel.diagnostics.warning_count > 0
+                  });
+                } else {
+                  handleFinalizeModel();
+                }
             } else {
                 setAwaitingFinalizeConfirmation(false);
                 addMessage("Okay, finalization cancelled. You can continue to explore and calibrate the models.", 'ai');
@@ -1711,12 +2248,20 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
         );
       
       case AppStep.Configure:
-        return <Configure 
-            edaResults={edaResults} 
+        return <Configure
+            edaResults={edaResults}
             selections={userSelections}
             onSelectionsChange={(selections) => {
               setUserSelections(selections);
               trackInteraction('column_assignment');
+            }}
+            channelOwnership={analysisState.channelOwnership}
+            onOwnershipChange={(ownership) => {
+              setAnalysisState(prev => ({
+                ...prev,
+                channelOwnership: ownership
+              }));
+              trackInteraction('channel_ownership_assigned');
             }}
             onProceed={handleProceedToValidation}
             isLoading={isLoading}
@@ -1754,7 +2299,7 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
           transform: f.transform 
         })).sort((a, b) => a.channel.localeCompare(b.channel))).slice(0, 8) : 'default';
         
-        return <ModelingView
+        return <DualModelView
             models={modelLeaderboard}
             selectedChannels={approvedChannels}
             activeModelId={activeModelId}
@@ -1763,6 +2308,11 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
             onRequestFinalize={handleRequestFinalizeModel}
             isRecalibrating={isRecalibrating}
             onRecalibrate={(selectedChannels, updatedParams) => {
+              console.log('[App.tsx] onRecalibrate called with:', {
+                selectedChannels,
+                updatedParamsCount: updatedParams?.length
+              });
+              
               if (selectedChannels && updatedParams) {
                 // Update feature params to only include selected channels
                 setFeatureParams(updatedParams);
@@ -1774,21 +2324,68 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
                   }))
                 );
               }
-              handleRunModels();
+              // DO NOT call handleRunModels() here - it will overwrite the recalibrated models!
+              // The recalibrated models are already added via onModelsUpdated callback
             }}
             onModelsUpdated={(newModels) => {
-              // Mark new models with isNew flag and generate unique IDs
-              const markedResults = newModels.map((model, index) => ({
-                ...model,
-                id: `${model.id}_${Date.now()}_${index}`, // Ensure unique IDs
-                isNew: true
-              }));
+              console.log('[App.tsx] onModelsUpdated callback received:', {
+                newModelsCount: newModels.length,
+                newModelIds: newModels.map(m => m.id),
+                currentLeaderboardSize: modelLeaderboard.length
+              });
+              
+              // Generate simple incremental IDs for recalibrated models
+              const existingCount = modelLeaderboard.length;
+              const markedResults = newModels.map((model, index) => {
+                // Extract algorithm abbreviation
+                const algoAbbrev = model.algo
+                  .split(' ')
+                  .map(word => word[0])
+                  .join('')
+                  .toUpperCase(); // e.g., "BR" for Bayesian Regression, "NN" for NN
+                
+                // Create simple ID with 'v' prefix for recalibrated models like "BR_v12" or "NN_v15"
+                const modelNumber = existingCount + index + 1;
+                const simpleId = `${algoAbbrev}_v${modelNumber}`;
+                
+                console.log('[App.tsx] Processing recalibrated model:', {
+                  originalId: model.id,
+                  newId: simpleId,
+                  channels: model.channels,
+                  details: model.details?.length
+                });
+                
+                return {
+                  ...model,
+                  id: simpleId,
+                  isNew: true,
+                  isRecalibrated: true, // Mark as recalibrated
+                  originalId: model.id, // Keep original ID for reference
+                  // Ensure channels are preserved
+                  channels: model.channels || []
+                };
+              });
+              
+              console.log('[App.tsx] Marked results with simple IDs:', markedResults.map(m => m.id));
               
               // Mark all existing models as not new anymore
               const existingModels = modelLeaderboard.map(m => ({ ...m, isNew: false }));
               
               // Append new models to existing ones
-              setModelLeaderboard([...existingModels, ...markedResults]);
+              const updatedLeaderboard = [...existingModels, ...markedResults];
+              setModelLeaderboard(updatedLeaderboard);
+              
+              console.log('[App.tsx] Updated leaderboard:', {
+                previousSize: existingModels.length,
+                newModelsAdded: markedResults.length,
+                totalSize: updatedLeaderboard.length,
+                newModelDetails: markedResults.map(m => ({ 
+                  id: m.id, 
+                  channels: m.channels, 
+                  isNew: m.isNew,
+                  isRecalibrated: m.isRecalibrated 
+                }))
+              });
               
               // Select first new model if no model is currently active
               if (markedResults.length > 0 && !activeModelId) {
@@ -1805,7 +2402,7 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
       
       case AppStep.Report: {
         const approvedChannels = channelDiagnostics.filter(c => c.isApproved).map(c => c.name);
-        return <RevertedFinalReport 
+        return <DualModelReport
           activeModelId={finalizedModel?.id || null}
           models={modelLeaderboard}
           selectedChannels={approvedChannels}
@@ -1854,19 +2451,35 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
 
   return (
     <div className="flex h-screen font-sans bg-[#F4F3F3] text-[#1A1628]">
-      <div className="w-full max-w-md bg-white flex flex-col p-4 border-r border-gray-200">
-        <div className="mb-4 pb-3 border-b border-gray-200">
+      <div className="w-full max-w-md bg-white flex flex-col border-r border-gray-200">
+        {/* Header with Logo and Mode Toggle */}
+        <div className="p-4 pb-3 border-b border-gray-200 space-y-3 flex-shrink-0">
           <Logo />
+          <ProductModeToggle
+            productMode={productMode}
+            onToggle={setProductMode}
+          />
         </div>
-        <div className="flex-grow overflow-y-auto pr-2 custom-scrollbar">
+
+        {/* Agent Panel - Top Section */}
+        <div className="flex-shrink-0">
+          <AgentPanel
+            actions={proposedActions}
+            decisions={decisionLog}
+            onActionClick={handleNextActionClick}
+          />
+        </div>
+
+        {/* Chat Messages - Bottom Section */}
+        <div className="flex-grow overflow-y-auto p-4 pr-2 custom-scrollbar">
           {filteredMessages.map(msg => <ChatMessage key={msg.id} message={msg} onActionClick={handleChatActionClick} />)}
           {(isLoading || isChatLoading) && <ChatMessage message={{id:0, sender:'ai', text:<Loader />}} onActionClick={handleChatActionClick} />}
           <div ref={messagesEndRef} />
         </div>
-        
+
         {/* QuickActions Bar - Pills only under composer */}
         {CHAT_UI_PILLS_ONLY ? (
-          <div className="border-t border-gray-200 pt-3 mb-3">
+          <div className="border-t border-gray-200 pt-3 mb-3 px-4">
             {getDynamicSuggestions().length > 0 ? (
               <QuickActionsBar 
                 suggestions={getDynamicSuggestions()}
@@ -1883,10 +2496,15 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
           </div>
         ) : (
           /* Legacy mode - original suggestion panel */
-          <div className="border-t border-gray-200 pt-3 mb-3">
+          <div className="border-t border-gray-200 pt-3 mb-3 px-4">
             {getDynamicSuggestions().length > 0 ? (
               <>
-                <div className="text-xs text-gray-500 mb-2">💡 What would you like to explore?</div>
+                <div className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <span>What would you like to explore?</span>
+                </div>
                 <div className="flex flex-wrap gap-1">
                   {getDynamicSuggestions().slice(0, 3).map((suggestion, index) => (
                     <button
@@ -1912,13 +2530,15 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
           </div>
         )}
         {showUserInput && (
-           <UserInput 
-            value={userQuery}
-            onValueChange={setUserQuery}
-            onSubmit={handleUserQuery}
-            placeholder={"Ask a question or give a command..."} 
-            disabled={isLoading || isChatLoading || isRecalibrating}
-           />
+          <div className="px-4 pb-4">
+            <UserInput
+              value={userQuery}
+              onValueChange={setUserQuery}
+              onSubmit={handleUserQuery}
+              placeholder={"Ask a question or give a command..."}
+              disabled={isLoading || isChatLoading || isRecalibrating}
+            />
+          </div>
         )}
       </div>
       <main className="flex-1 flex flex-col bg-[#F4F3F3]">
@@ -1943,11 +2563,33 @@ Key Trade-offs: ${scenario1.projectedROI > scenario2.projectedROI ? scenario1.ti
       />
       
       {/* Staged Model Training */}
-      <StagedModelTraining 
+      <StagedModelTraining
         isActive={showStagedTraining}
         onComplete={handleStagedTrainingComplete}
         selectedChannels={channelDiagnostics.filter(c => c.isApproved).map(c => c.name)}
         algorithmCount={4}
+      />
+
+      {/* Decision Checkpoint Modal */}
+      <DecisionCheckpointModal
+        isOpen={checkpointModalConfig.isOpen}
+        title={checkpointModalConfig.title}
+        step={checkpointModalConfig.step}
+        itemsBeingLocked={checkpointModalConfig.items}
+        downstreamImpact={checkpointModalConfig.impact}
+        onLockAndProceed={checkpointModalConfig.onConfirm}
+        onEdit={checkpointModalConfig.onEdit}
+        onProceedAnyway={checkpointModalConfig.onOverride}
+        allowProceedAnyway={checkpointModalConfig.allowOverride}
+      />
+
+      {/* Critic Warning Modal */}
+      <CriticWarningModal
+        isOpen={isCriticModalOpen}
+        warnings={criticWarnings}
+        onAcknowledge={() => criticOnAcknowledge && criticOnAcknowledge()}
+        onOverride={(reason) => criticOnOverride && criticOnOverride(reason)}
+        onGoBack={() => criticOnGoBack && criticOnGoBack()}
       />
     </div>
   );

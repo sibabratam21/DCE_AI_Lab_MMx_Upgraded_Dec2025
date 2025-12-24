@@ -543,6 +543,13 @@ export const generateValidatedActiveModels = async (activityChannels: string[], 
 
 // Generate realistic model leaderboard with believable performance metrics (activity channels only)
 export const generateDemoModels = (activityChannels: string[], userSelections?: UserColumnSelection, userContext?: string, featureParams?: FeatureParams[], channelDiagnostics?: ChannelDiagnostic[]): ModelRun[] => {
+    console.log('[generateDemoModels] Called with:', {
+        activityChannels,
+        userContext,
+        featureParamsCount: featureParams?.length || 0,
+        channelDiagnosticsCount: channelDiagnostics?.length || 0
+    });
+    
     const models: ModelRun[] = [];
     let modelCounter = 1;
     
@@ -657,7 +664,13 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
         }
     ];
 
+    console.log('[generateDemoModels] Processing algorithm configs:', {
+        configCount: algoConfigs.length,
+        configs: algoConfigs.map(c => ({ name: c.name, variants: c.variants }))
+    });
+    
     algoConfigs.forEach(config => {
+        console.log(`[generateDemoModels] Processing ${config.name} with ${config.variants} variants`);
         for (let variant = 1; variant <= config.variants; variant++) {
             // Create realistic performance variation within algorithm family
             const rsqVariation = Math.random() * (config.rsqRange[1] - config.rsqRange[0]) + config.rsqRange[0];
@@ -779,7 +792,7 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
             
             const modelDiagnostics = generateDiagnostics(modelDetails, config.name, rsqVariation, mapeVariation);
             
-            models.push({
+            const newModel = {
                 id: `${config.name.toLowerCase().replace(/\s+/g, '_')}_${variant}`,
                 algo: config.name as 'Bayesian Regression' | 'NN' | 'LightGBM' | 'GLM Regression',
                 rsq: rsqVariation,
@@ -800,17 +813,32 @@ export const generateDemoModels = (activityChannels: string[], userSelections?: 
                 isNew: false, // Will be set to true for newly generated models
                 isPinned: false,
                 isStale: false
-            } as ModelRun);
+            } as ModelRun;
+            
+            console.log(`[generateDemoModels] Pushing model ${newModel.id} with channels:`, newModel.channels);
+            models.push(newModel);
             
             modelCounter++;
         }
     });
+    
+    console.log('[generateDemoModels] Generated models before sorting:', {
+        count: models.length,
+        sampleIds: models.slice(0, 3).map(m => m.id)
+    });
 
     // Sort by performance (R² desc, then MAPE asc)
-    return models.sort((a, b) => {
+    const sortedModels = models.sort((a, b) => {
         if (Math.abs(a.rsq - b.rsq) > 0.02) return b.rsq - a.rsq;
         return a.mape - b.mape;
     });
+    
+    console.log('[generateDemoModels] Returning sorted models:', {
+        count: sortedModels.length,
+        sampleIds: sortedModels.slice(0, 3).map(m => m.id)
+    });
+    
+    return sortedModels;
 };
 
 // Generate realistic optimization scenarios (spend-based allocations from activity analysis)

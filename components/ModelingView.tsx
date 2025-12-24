@@ -93,11 +93,20 @@ export const ModelingView: React.FC<ModelingViewProps> = ({
             selectedChannels = configOrChannels || [];
             paramRanges = updatedParams || featureParams;
         }
+        
+        console.log('[ModelingView] Starting recalibration with config:', {
+            selectedChannels,
+            paramRangesCount: paramRanges.length,
+            hasBaselineConfig: !!baselineConfig,
+            baselineModelId: baselineConfig?.baseline_model_id
+        });
+        
         setShowRecalibrationWizard(false);
         
         // Wrap the training API call in staged progress
         try {
             const result = await modelProgress.executeWithProgress(async () => {
+                console.log('[ModelingView] Calling trainModels API...');
                 // POST /train with baseline-aware configuration
                 const response = await trainModels({
                     selectedChannels,
@@ -106,27 +115,54 @@ export const ModelingView: React.FC<ModelingViewProps> = ({
                     rationale: baselineConfig ? 'Baseline-aware recalibration' : 'Standard recalibration'
                 });
                 
-                if (!response.success) {
-                    throw new Error(response.message);
+                console.log('[ModelingView] TrainModels API response:', {
+                    success: response?.success,
+                    newModelsCount: response?.newModels?.length,
+                    message: response?.message,
+                    fullResponse: response
+                });
+                
+                if (!response || !response.success) {
+                    console.error('[ModelingView] Training failed:', response);
+                    throw new Error(response?.message || 'Training failed - no response');
                 }
                 
                 return response;
             });
             
+            console.log('[ModelingView] Training completed with result:', {
+                resultExists: !!result,
+                resultType: typeof result,
+                hasSuccess: result?.success,
+                hasNewModels: !!result?.newModels,
+                newModelsLength: result?.newModels?.length,
+                fullResult: result
+            });
+            
             if (result?.success && result.newModels.length > 0) {
+                console.log(`[ModelingView] Adding ${result.newModels.length} new models:`, result.newModels.map(m => m.id));
+                
                 // Append new candidates to existing models
                 if (onModelsUpdated) {
                     onModelsUpdated(result.newModels);
+                    console.log('[ModelingView] Called onModelsUpdated callback');
+                } else {
+                    console.warn('[ModelingView] onModelsUpdated callback not provided');
                 }
                 
                 // Call original recalibrate to update parent state
                 onRecalibrate(selectedChannels, paramRanges);
                 
                 console.log(`[ModelingView] Successfully added ${result.newModels.length} new models`);
+            } else {
+                console.warn('[ModelingView] No new models to add:', { 
+                    success: result?.success, 
+                    modelCount: result?.newModels?.length 
+                });
             }
         } catch (error) {
             if (error instanceof Error && error.name !== 'AbortError') {
-                console.error('Recalibration failed:', error);
+                console.error('[ModelingView] Recalibration failed:', error);
                 // Could show error toast here
             }
         }
